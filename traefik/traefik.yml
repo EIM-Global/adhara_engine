@@ -1,0 +1,44 @@
+# ============================================================
+# Traefik v3 - Static Configuration
+# ============================================================
+
+api:
+  dashboard: true
+  insecure: true  # Dashboard at :8080 without auth (dev only)
+
+entryPoints:
+  web:
+    address: ":80"
+    # No global HTTPS redirect — localhost dev needs HTTP.
+    # Custom domain routers opt into HTTPS individually via cert resolver.
+  websecure:
+    address: ":443"
+  zitadel:
+    address: ":8081"
+    # Zitadel OIDC + console + login UI accessible at localhost:8081
+
+providers:
+  docker:
+    exposedByDefault: false       # Only route containers with traefik.enable=true
+    network: adhara-engine-net    # Use the engine network to reach site containers
+  file:
+    directory: "/etc/traefik/dynamic"
+    watch: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "${ACME_EMAIL}"
+      storage: "/letsencrypt/acme.json"
+      httpChallenge:
+        entryPoint: web
+
+log:
+  level: INFO
+  format: json
+
+accessLog:
+  format: json
+  filters:
+    statusCodes:
+      - "400-599"

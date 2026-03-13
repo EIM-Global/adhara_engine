@@ -1,0 +1,338 @@
+# ============================================================
+# Adhara Engine - Docker Compose
+# ============================================================
+# Runtime-agnostic: works with OrbStack, Docker Desktop,
+# Docker Engine, Podman, Colima, or any Docker-compatible runtime.
+#
+# Profiles:
+#   (no profile)  — Core: api, worker, ui, traefik, db, redis (~500MB)
+#   auth          — Logto OIDC (~150MB) — lightweight SSO (DEFAULT)
+#   zitadel       — Zitadel OIDC (+800MB) — enterprise SSO
+#   observability — Logging: loki, alloy, grafana (+400MB)
+#   registry      — Docker Registry v2 (+30MB)
+#   storage       — MinIO S3-compatible storage (+100MB)
+#   all           — Everything (Logto as auth, not Zitadel)
+#
+# Usage:
+#   docker compose up -d                                # Core only (~500MB)
+#   docker compose --profile auth up -d                 # Core + Logto SSO
+#   docker compose --profile zitadel up -d              # Core + Zitadel SSO
+#   docker compose --profile auth --profile observability up -d  # SSO + Logging
+#   docker compose --profile all up -d                  # Everything
+
+name: adhara-engine
+
+services:
+  # ── Core Services (always on) ────────────────────────────────
+
+  api:
+    build: ./api
+    ports: ["127.0.0.1:8000:8000"]
+    volumes:
+      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    environment:
+      - DATABASE_URL=postgresql://engine:${POSTGRES_PASSWORD:-engine}@db:5432/adhara_engine
+      - REDIS_URL=redis://redis:6379
+      - ENGINE_SECRET_KEY=${ENGINE_SECRET_KEY:-dev-secret-change-me}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-engine}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-engine-secret}
+      # OIDC provider — defaults to Logto. Override for Zitadel.
+      - OIDC_INTERNAL_URL=${OIDC_INTERNAL_URL:-http://logto:3001}
+      - OIDC_ISSUER=${OIDC_ISSUER:-http://${ADHARA_HOST:-localhost}:3001}
+      - OIDC_JWKS_PATH=${OIDC_JWKS_PATH:-/oidc/jwks}
+      - OIDC_USERINFO_PATH=${OIDC_USERINFO_PATH:-/oidc/me}
+      # Zitadel legacy (only when --profile zitadel is used)
+      - ZITADEL_DOMAIN=${ZITADEL_DOMAIN:-}
+      - ZITADEL_ISSUER=${ZITADEL_ISSUER:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  worker:
+    build: ./api
+    command: ["arq", "app.workers.settings.WorkerSettings"]
+    volumes:
+      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+    environment:
+      - DATABASE_URL=postgresql://engine:${POSTGRES_PASSWORD:-engine}@db:5432/adhara_engine
+      - REDIS_URL=redis://redis:6379
+      - ENGINE_SECRET_KEY=${ENGINE_SECRET_KEY:-dev-secret-change-me}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-engine}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-engine-secret}
+      - OIDC_INTERNAL_URL=${OIDC_INTERNAL_URL:-http://logto:3001}
+      - OIDC_ISSUER=${OIDC_ISSUER:-http://${ADHARA_HOST:-localhost}:3001}
+      - ZITADEL_DOMAIN=${ZITADEL_DOMAIN:-}
+      - ZITADEL_ISSUER=${ZITADEL_ISSUER:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  ui:
+    build: ./ui
+    # No host port — accessed only via Traefik on port 80/443
+    environment:
+      - API_BACKEND=${API_BACKEND:-http://api:8000}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  traefik:
+    image: traefik:v3.4
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:8080:8080"   # Traefik dashboard — localhost only
+      - "127.0.0.1:8081:8081"   # Zitadel legacy — localhost only
+    environment:
+      - ACME_EMAIL=${ACME_EMAIL:-admin@adharaweb.com}
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - traefik-certs:/letsencrypt
+      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  # ── Data (always on) ─────────────────────────────────────────
+
+  db:
+    image: postgres:16-alpine
+    ports: ["127.0.0.1:5432:5432"]
+    environment:
+      - POSTGRES_USER=engine
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-engine}
+      - POSTGRES_DB=adhara_engine
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engine -d adhara_engine"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  # ── Authentication: Logto (profile: auth) ───────────────────
+  # Lightweight OIDC provider (~150MB). Default SSO option.
+  # Admin console at localhost:3002, OIDC at localhost:3001.
+
+  logto:
+    image: svhd/logto:latest
+    profiles: [auth, all]
+    ports:
+      - "127.0.0.1:3001:3001"   # OIDC endpoints
+      - "127.0.0.1:3002:3002"   # Admin console
+    environment:
+      - TRUST_PROXY_HEADER=true
+      - DB_URL=postgresql://engine:${POSTGRES_PASSWORD:-engine}@db:5432/logto
+      - ENDPOINT=http://${ADHARA_HOST:-localhost}:3001
+      - ADMIN_ENDPOINT=http://${ADHARA_HOST:-localhost}:3002
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  # ── Authentication: Zitadel (profile: zitadel) ──────────────
+  # Enterprise OIDC provider (~800MB). Use when you need advanced
+  # multi-tenancy, event sourcing, or enterprise compliance.
+
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v4.11.0
+    profiles: [zitadel]
+    command: start-from-init --masterkeyFromEnv --tlsMode disabled
+    user: "0"
+    environment:
+      - ZITADEL_MASTERKEY=${ZITADEL_MASTERKEY:-MasterkeyNeedsToHave32Characters}
+      - ZITADEL_PORT=8080
+      - ZITADEL_DATABASE_POSTGRES_HOST=db
+      - ZITADEL_DATABASE_POSTGRES_PORT=5432
+      - ZITADEL_DATABASE_POSTGRES_DATABASE=zitadel
+      - ZITADEL_DATABASE_POSTGRES_USER_USERNAME=zitadel
+      - ZITADEL_DATABASE_POSTGRES_USER_PASSWORD=${ZITADEL_DB_PASSWORD:-zitadel}
+      - ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE=disable
+      - ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME=engine
+      - ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD=${POSTGRES_PASSWORD:-engine}
+      - ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE=disable
+      - ZITADEL_EXTERNALSECURE=false
+      - ZITADEL_EXTERNALPORT=80
+      - ZITADEL_EXTERNALDOMAIN=${ADHARA_HOST:-localhost}
+      # Login v2 settings — first-init writes PAT to shared volume
+      - ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED=false
+      - ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH=/zitadel/bootstrap/login-client.pat
+      - ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME=login-client
+      - ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME=Automatically Initialized IAM_LOGIN_CLIENT
+      - ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE=${LOGIN_CLIENT_PAT_EXPIRATION:-2099-01-01T00:00:00Z}
+      - ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED=true
+      - ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI=http://${ADHARA_HOST:-localhost}/ui/v2/login/
+      - ZITADEL_OIDC_DEFAULTLOGINURLV2=http://${ADHARA_HOST:-localhost}/ui/v2/login/login?authRequest=
+      - ZITADEL_OIDC_DEFAULTLOGOUTURLV2=http://${ADHARA_HOST:-localhost}/ui/v2/login/logout?post_logout_redirect=
+    volumes:
+      - zitadel-bootstrap:/zitadel/bootstrap:rw
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  zitadel-login:
+    image: ghcr.io/zitadel/zitadel-login:v4.11.0
+    profiles: [zitadel]
+    environment:
+      - ZITADEL_API_URL=http://zitadel:8080
+      - NEXT_PUBLIC_BASE_PATH=/ui/v2/login
+      - ZITADEL_SERVICE_USER_TOKEN_FILE=/zitadel/bootstrap/login-client.pat
+      - CUSTOM_REQUEST_HEADERS=Host:${ADHARA_HOST:-localhost},X-Forwarded-Proto:http
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c", "node /app/healthcheck.js http://localhost:3000/ui/v2/login/healthy"]
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 20s
+    volumes:
+      - zitadel-bootstrap:/zitadel/bootstrap:ro
+    depends_on:
+      zitadel:
+        condition: service_started
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  # ── Registry (profile: registry) ─────────────────────────────
+
+  registry:
+    image: registry:2
+    profiles: [registry, all]
+    ports: ["127.0.0.1:5000:5000"]
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - registry-data:/var/lib/registry
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  # ── Storage (profile: storage) ───────────────────────────────
+
+  minio:
+    image: minio/minio:latest
+    profiles: [storage, all]
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-engine}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-engine-secret}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  # ── Logging (profile: observability) ─────────────────────────
+
+  loki:
+    image: grafana/loki:3.4
+    profiles: [observability, all]
+    ports: ["127.0.0.1:3100:3100"]
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:latest
+    profiles: [observability, all]
+    volumes:
+      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    command: run /etc/alloy/config.alloy
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles: [observability, all]
+    ports: ["127.0.0.1:3003:3000"]
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  registry-data:
+  traefik-certs:
+  minio-data:
+  loki-data:
+  grafana-data:
+  zitadel-bootstrap:
+
+networks:
+  adhara-engine-net:
+    name: adhara-engine-net
+    driver: bridge

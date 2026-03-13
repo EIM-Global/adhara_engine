@@ -1,0 +1,2 @@
+[console_scripts]
+adhara-engine = adhara_engine_cli.main:app

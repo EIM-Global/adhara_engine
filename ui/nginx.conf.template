@@ -1,0 +1,28 @@
+server {
+    listen 5173;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # API proxy — forward to the api service
+    # API_BACKEND is set via environment variable (default: http://api:8000)
+    location /api/ {
+        proxy_pass ${API_BACKEND};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Authorization $http_authorization;
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /health {
+        proxy_pass ${API_BACKEND};
+    }
+
+    # SPA fallback — serve index.html for all routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

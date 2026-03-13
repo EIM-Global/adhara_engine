@@ -1,0 +1,85 @@
+# ============================================================
+# Traefik Dynamic Config - Service Routing
+# ============================================================
+# Uses file provider instead of Docker labels (Docker provider
+# has API version issues with Docker Engine 27+).
+
+http:
+  routers:
+    # ── UI (Dashboard) ────────────────────────────────────────
+    # Catch-all on port 80 — serves the dashboard at the root
+    ui:
+      rule: "PathPrefix(`/`)"
+      entryPoints: [web]
+      service: ui
+      priority: 1
+
+    # ── API ────────────────────────────────────────────────────
+    api-backend:
+      rule: "PathPrefix(`/api`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/health`)"
+      entryPoints: [web]
+      service: api-backend
+      priority: 100
+
+    # ── Zitadel (profile: zitadel) — routed through port 80 ──
+    # Only active when Zitadel containers are running.
+    # Note: /auth/callback must NOT match — it's the UI's OIDC redirect.
+    zitadel-web:
+      rule: "PathPrefix(`/oauth`) || PathPrefix(`/oidc`) || PathPrefix(`/.well-known`) || PathPrefix(`/ui/console`) || PathPrefix(`/debug`) || PathPrefix(`/management/v1`) || PathPrefix(`/admin/v1`) || PathPrefix(`/auth/v1`) || PathPrefix(`/v2`) || PathPrefix(`/caos`) || PathPrefix(`/zitadel`)"
+      entryPoints: [web]
+      service: zitadel-api
+      priority: 200
+
+    zitadel-login-web:
+      rule: "PathPrefix(`/ui/v2/login`)"
+      entryPoints: [web]
+      service: zitadel-login
+      priority: 300
+
+    # Legacy port 8081 routes (kept for backward compat / SSH tunnel access)
+    zitadel-api-legacy:
+      rule: "PathPrefix(`/`)"
+      entryPoints: [zitadel]
+      service: zitadel-api
+      priority: 100
+
+    zitadel-login-legacy:
+      rule: "PathPrefix(`/ui/v2/login`)"
+      entryPoints: [zitadel]
+      service: zitadel-login
+      priority: 200
+
+  services:
+    ui:
+      loadBalancer:
+        servers:
+          - url: "http://ui:5173"
+
+    api-backend:
+      loadBalancer:
+        servers:
+          - url: "http://api:8000"
+
+    # Logto — OIDC endpoints and admin console
+    # Accessed directly on ports 3001/3002 (not path-routed through Traefik)
+    # because Logto doesn't support subpath routing.
+    logto:
+      loadBalancer:
+        servers:
+          - url: "http://logto:3001"
+
+    # Zitadel services (only used with --profile zitadel)
+    zitadel-api:
+      loadBalancer:
+        servers:
+          - url: "http://zitadel:8080"
+
+    zitadel-login:
+      loadBalancer:
+        servers:
+          - url: "http://zitadel-login:3000"
+
+    registry:
+      loadBalancer:
+        servers:
+          - url: "http://registry:5000"
