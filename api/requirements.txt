@@ -13,3 +13,5 @@ python-multipart==0.0.20
 minio==7.2.15
 pyjwt[crypto]==2.10.1
 arq==0.26.1
+slowapi==0.1.9
+cryptography>=42.0.0

@@ -16,6 +16,7 @@ and routes to the appropriate validation logic.
 
 import hashlib
 import logging
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -30,6 +31,8 @@ from app.core.database import get_db
 security = HTTPBearer(auto_error=False)
 
 _jwks_cache: dict | None = None
+_jwks_cache_time: float = 0.0
+_JWKS_CACHE_TTL: float = 3600.0  # 60 minutes
 
 # ── API Token prefix ─────────────────────────────────────────
 API_TOKEN_PREFIX = "ae_"
@@ -59,8 +62,8 @@ def _get_oidc_urls() -> tuple[str, str, str]:
 
 async def _get_jwks() -> dict:
     """Fetch and cache the OIDC provider's JWKS for JWT verification."""
-    global _jwks_cache
-    if _jwks_cache is not None:
+    global _jwks_cache, _jwks_cache_time
+    if _jwks_cache is not None and (time.monotonic() - _jwks_cache_time) < _JWKS_CACHE_TTL:
         return _jwks_cache
 
     jwks_url, _, issuer = _get_oidc_urls()
@@ -77,6 +80,7 @@ async def _get_jwks() -> dict:
             resp = await client.get(jwks_url, headers=headers)
             resp.raise_for_status()
             _jwks_cache = resp.json()
+            _jwks_cache_time = time.monotonic()
             return _jwks_cache
     except Exception:
         raise HTTPException(
@@ -125,15 +129,26 @@ async def _validate_jwt(token: str) -> dict:
                 key = jwt.algorithms.RSAAlgorithm.from_jwk(k)
                 break
         if key is None:
-            raise HTTPException(status_code=401, detail="Invalid token signing key")
+            # Key not found — maybe JWKS rotated. Invalidate cache and retry once.
+            global _jwks_cache
+            _jwks_cache = None
+            jwks = await _get_jwks()
+            for k in jwks.get("keys", []):
+                if k["kid"] == header.get("kid"):
+                    key = jwt.algorithms.RSAAlgorithm.from_jwk(k)
+                    break
+            if key is None:
+                raise HTTPException(status_code=401, detail="Invalid token signing key")
 
-        payload = jwt.decode(
-            token,
-            key,
-            algorithms=["RS256"],
-            issuer=issuer,
-            options={"verify_aud": False},
-        )
+        decode_options = {"verify_aud": bool(settings.oidc_client_id)}
+        decode_kwargs = {
+            "algorithms": ["RS256"],
+            "issuer": issuer,
+            "options": decode_options,
+        }
+        if settings.oidc_client_id:
+            decode_kwargs["audience"] = settings.oidc_client_id
+        payload = jwt.decode(token, key, **decode_kwargs)
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")

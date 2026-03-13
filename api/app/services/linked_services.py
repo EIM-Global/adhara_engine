@@ -187,9 +187,20 @@ async def provision_service(
 async def _provision_minio_bucket(
     db: Session, linked_service: LinkedService, site: Site
 ) -> LinkedService:
-    """Create a MinIO bucket using the shared MinIO instance."""
+    """Create a MinIO bucket with scoped bucket policy.
+
+    Root MinIO credentials are used only for the admin operation of
+    creating the bucket and setting its policy.  They are NOT injected
+    into site containers.  Sites that need direct S3 access should
+    request scoped credentials through the engine API.
+
+    TODO: When the MinIO Python admin SDK is available, create
+    per-bucket service accounts instead of relying solely on
+    bucket policies.
+    """
     from minio import Minio
     from app.core.config import settings
+    import json
 
     linked_service.status = "provisioning"
     db.commit()
@@ -207,11 +218,34 @@ async def _provision_minio_bucket(
         if not client.bucket_exists(bucket_name):
             client.make_bucket(bucket_name)
 
+        # Set a bucket-scoped policy restricting access to this bucket only
+        policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Action": [
+                        "s3:GetObject",
+                        "s3:PutObject",
+                        "s3:DeleteObject",
+                        "s3:ListBucket",
+                        "s3:GetBucketLocation",
+                    ],
+                    "Resource": [
+                        f"arn:aws:s3:::{bucket_name}",
+                        f"arn:aws:s3:::{bucket_name}/*",
+                    ],
+                }
+            ],
+        }
+        client.set_bucket_policy(bucket_name, json.dumps(policy))
+
+        # Do NOT inject root MinIO credentials into site containers.
+        # Sites access storage through the engine API or request
+        # scoped credentials via the /api/v1/sites/{id}/storage endpoint.
         connection_env = {
             "S3_BUCKET": bucket_name,
             "S3_ENDPOINT": f"http://{settings.minio_endpoint}",
-            "S3_ACCESS_KEY": settings.minio_access_key,
-            "S3_SECRET_KEY": settings.minio_secret_key,
         }
 
         linked_service.status = "running"

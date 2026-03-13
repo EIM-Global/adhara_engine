@@ -84,23 +84,23 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
 
     # Handle PR events for preview environments
     if event_type == "pull_request":
-        return await _handle_github_pr(payload, body, db)
+        return await _handle_github_pr(request, payload, body, db)
 
     if event_type != "push":
-        return {"status": "ignored", "reason": f"event type '{event_type}' not handled"}
+        return {"status": "ok"}
 
     # Parse push event
     push = _parse_github_push(payload)
     if push is None:
-        return {"status": "ignored", "reason": "could not parse push event"}
+        return {"status": "ok"}
     if push.is_branch_delete:
-        return {"status": "ignored", "reason": "branch delete"}
+        return {"status": "ok"}
 
     # Find matching site
     site = _find_site_for_push(db, push)
     if site is None:
         logger.info(f"No matching site for GitHub push to {push.repo_path}:{push.branch}")
-        return {"status": "ignored", "reason": "no matching site"}
+        return {"status": "ok"}
 
     # Verify HMAC signature
     signature = request.headers.get("X-Hub-Signature-256", "")
@@ -111,11 +111,11 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
 
     # Dedup: skip if this SHA was already deployed
     if site.last_deployed_sha == push.commit_sha:
-        return {"status": "skipped", "reason": "commit already deployed"}
+        return {"status": "ok"}
 
     # Enqueue pipeline
     result = await _enqueue_pipeline(db, site, push)
-    return result
+    return {"status": "ok"}
 
 
 def _parse_github_push(payload: dict) -> PushEvent | None:
@@ -180,20 +180,20 @@ async def gitlab_webhook(request: Request, db: Session = Depends(get_db)):
         return await _handle_gitlab_mr(payload, db)
 
     if event_type != "push":
-        return {"status": "ignored", "reason": f"event type '{event_type}' not handled"}
+        return {"status": "ok"}
 
     # Parse push event
     push = _parse_gitlab_push(payload)
     if push is None:
-        return {"status": "ignored", "reason": "could not parse push event"}
+        return {"status": "ok"}
     if push.is_branch_delete:
-        return {"status": "ignored", "reason": "branch delete"}
+        return {"status": "ok"}
 
     # Find matching site
     site = _find_site_for_push(db, push)
     if site is None:
         logger.info(f"No matching site for GitLab push to {push.repo_path}:{push.branch}")
-        return {"status": "ignored", "reason": "no matching site"}
+        return {"status": "ok"}
 
     # Verify token
     token = request.headers.get("X-Gitlab-Token", "")
@@ -204,11 +204,11 @@ async def gitlab_webhook(request: Request, db: Session = Depends(get_db)):
 
     # Dedup
     if site.last_deployed_sha == push.commit_sha:
-        return {"status": "skipped", "reason": "commit already deployed"}
+        return {"status": "ok"}
 
     # Enqueue pipeline
     result = await _enqueue_pipeline(db, site, push)
-    return result
+    return {"status": "ok"}
 
 
 def _parse_gitlab_push(payload: dict) -> PushEvent | None:
@@ -337,14 +337,14 @@ async def _enqueue_pipeline(db: Session, site: Site, push: PushEvent) -> dict:
 # ── PR/MR Preview Handlers ──────────────────────────────────────────
 
 
-async def _handle_github_pr(payload: dict, body: bytes, db) -> dict:
+async def _handle_github_pr(request: Request, payload: dict, body: bytes, db) -> dict:
     """Handle GitHub pull_request events for preview environments."""
     action = payload.get("action", "")
     pr = payload.get("pull_request", {})
     pr_number = pr.get("number")
 
     if not pr_number:
-        return {"status": "ignored", "reason": "no PR number"}
+        return {"status": "ok"}
 
     repo = payload.get("repository", {})
     repo_path = repo.get("full_name", "").lower()
@@ -352,14 +352,14 @@ async def _handle_github_pr(payload: dict, body: bytes, db) -> dict:
     # Find the matching site
     site = _find_site_for_repo(db, repo_path, "github")
     if not site:
-        return {"status": "ignored", "reason": "no matching site for PR preview"}
+        return {"status": "ok"}
 
     # Verify signature
-    signature = payload.get("X-Hub-Signature-256", "")
-    # For PR events we still verify the signature if present
-    if site.webhook_secret and signature:
-        if not _verify_github_signature(body, site.webhook_secret, signature):
-            raise HTTPException(status_code=403, detail="Invalid signature")
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    # Require valid signature when webhook_secret is configured
+    if site.webhook_secret:
+        if not signature or not _verify_github_signature(body, site.webhook_secret, signature):
+            raise HTTPException(status_code=403, detail="Invalid or missing signature")
 
     if action in ("opened", "synchronize", "reopened"):
         # Create or update preview
@@ -375,11 +375,7 @@ async def _handle_github_pr(payload: dict, body: bytes, db) -> dict:
             pr_author=pr.get("user", {}).get("login"),
             pr_url=pr.get("html_url"),
         )
-        return {
-            "status": "preview_building",
-            "preview_id": str(preview.id),
-            "pr_number": pr_number,
-        }
+        return {"status": "ok"}
 
     elif action in ("closed",):
         # Destroy preview
@@ -397,11 +393,11 @@ async def _handle_github_pr(payload: dict, body: bytes, db) -> dict:
             existing.pr_state = "merged" if merged else "closed"
             reason = "pr_merged" if merged else "pr_closed"
             await destroy_preview(db, existing, reason=reason)
-            return {"status": "preview_destroyed", "reason": reason}
+            return {"status": "ok"}
 
-        return {"status": "ignored", "reason": "no active preview for this PR"}
+        return {"status": "ok"}
 
-    return {"status": "ignored", "reason": f"PR action '{action}' not handled"}
+    return {"status": "ok"}
 
 
 async def _handle_gitlab_mr(payload: dict, db) -> dict:
@@ -411,14 +407,14 @@ async def _handle_gitlab_mr(payload: dict, db) -> dict:
     mr_iid = attrs.get("iid")
 
     if not mr_iid:
-        return {"status": "ignored", "reason": "no MR number"}
+        return {"status": "ok"}
 
     project = payload.get("project", {})
     repo_path = project.get("path_with_namespace", "").lower()
 
     site = _find_site_for_repo(db, repo_path, "gitlab")
     if not site:
-        return {"status": "ignored", "reason": "no matching site for MR preview"}
+        return {"status": "ok"}
 
     if action in ("open", "update", "reopen"):
         preview = await create_or_update_preview(
@@ -432,11 +428,7 @@ async def _handle_gitlab_mr(payload: dict, db) -> dict:
             pr_author=payload.get("user", {}).get("username"),
             pr_url=attrs.get("url"),
         )
-        return {
-            "status": "preview_building",
-            "preview_id": str(preview.id),
-            "mr_number": mr_iid,
-        }
+        return {"status": "ok"}
 
     elif action in ("close", "merge"):
         existing = (
@@ -452,11 +444,11 @@ async def _handle_gitlab_mr(payload: dict, db) -> dict:
             existing.pr_state = "merged" if action == "merge" else "closed"
             reason = f"pr_{action}d" if action != "merge" else "pr_merged"
             await destroy_preview(db, existing, reason=reason)
-            return {"status": "preview_destroyed", "reason": reason}
+            return {"status": "ok"}
 
-        return {"status": "ignored", "reason": "no active preview for this MR"}
+        return {"status": "ok"}
 
-    return {"status": "ignored", "reason": f"MR action '{action}' not handled"}
+    return {"status": "ok"}
 
 
 def _find_site_for_repo(db, repo_path: str, provider: str) -> Site | None:

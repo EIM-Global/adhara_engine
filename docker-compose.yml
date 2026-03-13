@@ -28,15 +28,13 @@ services:
   api:
     build: ./api
     ports: ["127.0.0.1:8000:8000"]
-    volumes:
-      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     environment:
-      - DATABASE_URL=postgresql://engine:${POSTGRES_PASSWORD:-engine}@db:5432/adhara_engine
+      - DATABASE_URL=postgresql://engine:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/adhara_engine
       - REDIS_URL=redis://redis:6379
-      - ENGINE_SECRET_KEY=${ENGINE_SECRET_KEY:-dev-secret-change-me}
+      - ENGINE_SECRET_KEY=${ENGINE_SECRET_KEY:?Set ENGINE_SECRET_KEY in .env}
       - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-engine}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-engine-secret}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
       # OIDC provider — defaults to Logto. Override for Zitadel.
       - OIDC_INTERNAL_URL=${OIDC_INTERNAL_URL:-http://logto:3001}
       - OIDC_ISSUER=${OIDC_ISSUER:-http://${ADHARA_HOST:-localhost}:3001}
@@ -63,24 +61,25 @@ services:
   worker:
     build: ./api
     command: ["arq", "app.workers.settings.WorkerSettings"]
-    volumes:
-      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     environment:
-      - DATABASE_URL=postgresql://engine:${POSTGRES_PASSWORD:-engine}@db:5432/adhara_engine
+      - DATABASE_URL=postgresql://engine:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/adhara_engine
       - REDIS_URL=redis://redis:6379
-      - ENGINE_SECRET_KEY=${ENGINE_SECRET_KEY:-dev-secret-change-me}
+      - ENGINE_SECRET_KEY=${ENGINE_SECRET_KEY:?Set ENGINE_SECRET_KEY in .env}
       - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-engine}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-engine-secret}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
       - OIDC_INTERNAL_URL=${OIDC_INTERNAL_URL:-http://logto:3001}
       - OIDC_ISSUER=${OIDC_ISSUER:-http://${ADHARA_HOST:-localhost}:3001}
       - ZITADEL_DOMAIN=${ZITADEL_DOMAIN:-}
       - ZITADEL_ISSUER=${ZITADEL_ISSUER:-}
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
     networks:
       - adhara-engine-net
     restart: unless-stopped
@@ -102,7 +101,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "127.0.0.1:8080:8080"   # Traefik dashboard — localhost only
       - "127.0.0.1:8081:8081"   # Zitadel legacy — localhost only
     environment:
       - ACME_EMAIL=${ACME_EMAIL:-admin@adharaweb.com}
@@ -122,7 +120,7 @@ services:
     ports: ["127.0.0.1:5432:5432"]
     environment:
       - POSTGRES_USER=engine
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-engine}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - POSTGRES_DB=adhara_engine
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -148,6 +146,22 @@ services:
       - adhara-engine-net
     restart: unless-stopped
 
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      - CONTAINERS=1
+      - IMAGES=1
+      - NETWORKS=1
+      - VOLUMES=1
+      - BUILD=1
+      - POST=1
+      - LOG_LEVEL=warning
+    volumes:
+      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    networks:
+      - adhara-engine-net
+    restart: unless-stopped
+
   # ── Authentication: Logto (profile: auth) ───────────────────
   # Lightweight OIDC provider (~150MB). Default SSO option.
   # Admin console at localhost:3002, OIDC at localhost:3001.
@@ -160,7 +174,7 @@ services:
       - "127.0.0.1:3002:3002"   # Admin console
     environment:
       - TRUST_PROXY_HEADER=true
-      - DB_URL=postgresql://engine:${POSTGRES_PASSWORD:-engine}@db:5432/logto
+      - DB_URL=postgresql://engine:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/logto
       - ENDPOINT=http://${ADHARA_HOST:-localhost}:3001
       - ADMIN_ENDPOINT=http://${ADHARA_HOST:-localhost}:3002
     depends_on:
@@ -180,16 +194,16 @@ services:
     command: start-from-init --masterkeyFromEnv --tlsMode disabled
     user: "0"
     environment:
-      - ZITADEL_MASTERKEY=${ZITADEL_MASTERKEY:-MasterkeyNeedsToHave32Characters}
+      - ZITADEL_MASTERKEY=${ZITADEL_MASTERKEY:?Set ZITADEL_MASTERKEY in .env}
       - ZITADEL_PORT=8080
       - ZITADEL_DATABASE_POSTGRES_HOST=db
       - ZITADEL_DATABASE_POSTGRES_PORT=5432
       - ZITADEL_DATABASE_POSTGRES_DATABASE=zitadel
       - ZITADEL_DATABASE_POSTGRES_USER_USERNAME=zitadel
-      - ZITADEL_DATABASE_POSTGRES_USER_PASSWORD=${ZITADEL_DB_PASSWORD:-zitadel}
+      - ZITADEL_DATABASE_POSTGRES_USER_PASSWORD=${ZITADEL_DB_PASSWORD:?Set ZITADEL_DB_PASSWORD in .env}
       - ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE=disable
       - ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME=engine
-      - ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD=${POSTGRES_PASSWORD:-engine}
+      - ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE=disable
       - ZITADEL_EXTERNALSECURE=false
       - ZITADEL_EXTERNALPORT=80
@@ -244,8 +258,12 @@ services:
     ports: ["127.0.0.1:5000:5000"]
     environment:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: "Adhara Engine Registry"
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
     volumes:
       - registry-data:/var/lib/registry
+      - registry-auth:/auth
     networks:
       - adhara-engine-net
     restart: unless-stopped
@@ -260,8 +278,8 @@ services:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
     environment:
-      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-engine}
-      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-engine-secret}
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
     volumes:
       - minio-data:/data
     healthcheck:
@@ -311,7 +329,7 @@ services:
     ports: ["127.0.0.1:3003:3000"]
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
@@ -331,6 +349,7 @@ volumes:
   loki-data:
   grafana-data:
   zitadel-bootstrap:
+  registry-auth:
 
 networks:
   adhara-engine-net:

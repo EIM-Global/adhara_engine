@@ -9,6 +9,7 @@ On failure, records the error and stops the pipeline.
 """
 
 import logging
+import re
 import shutil
 import tempfile
 import time
@@ -31,6 +32,20 @@ from app.services.local_deploy import LocalDeployTarget
 from app.services.port_manager import allocate_port
 
 logger = logging.getLogger(__name__)
+
+_TOKEN_PATTERNS = [
+    re.compile(r'https://[^@\s]+@', re.IGNORECASE),  # https://TOKEN@github.com
+    re.compile(r'(ghp_|gho_|github_pat_)[A-Za-z0-9_]+'),  # GitHub tokens
+    re.compile(r'(glpat-)[A-Za-z0-9\-_]+'),  # GitLab tokens
+    re.compile(r'(ae_live_|ae_test_)[A-Za-z0-9_]+'),  # Adhara Engine tokens
+]
+
+
+def _sanitize_log(text: str) -> str:
+    """Remove sensitive tokens from log output."""
+    for pattern in _TOKEN_PATTERNS:
+        text = pattern.sub('[REDACTED]', text)
+    return text
 
 # Stage definitions: (name, order)
 PIPELINE_STAGES = [
@@ -226,7 +241,7 @@ async def run_pipeline(ctx: dict, pipeline_run_id: str) -> dict:
         }
 
     except Exception as e:
-        logger.exception(f"Pipeline {pipeline_run_id} crashed: {e}")
+        logger.exception(f"Pipeline {pipeline_run_id} crashed: {_sanitize_log(str(e))}")
         try:
             run = db.query(PipelineRun).filter(PipelineRun.id == pipeline_run_id).first()
             if run:
@@ -382,8 +397,8 @@ async def _run_deploy_stage(
         runtime_env = {}
         if workspace.adhara_api_url:
             runtime_env["ADHARA_API_URL"] = workspace.adhara_api_url
-        if workspace.adhara_api_key:
-            runtime_env["ADHARA_API_KEY"] = workspace.adhara_api_key
+        # NOTE: Workspace API key is no longer injected into containers.
+        # Use per-deployment scoped tokens instead (see PR-8/PR-16).
         runtime_env["ADHARA_PUBLIC_URL"] = f"http://localhost:{site.host_port}"
         runtime_env.update(site.runtime_env or {})
 
@@ -452,4 +467,4 @@ def _fail_run(
     if site:
         site.status = "error"
     db.commit()
-    logger.error(f"Pipeline {run.id} failed: {error}")
+    logger.error(f"Pipeline {run.id} failed: {_sanitize_log(error)}")

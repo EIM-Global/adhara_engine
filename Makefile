@@ -37,7 +37,7 @@ init: .env ## First-time setup: core only (~500MB) — token auth
 	@echo " UI:               http://$(_HOST)"
 	@echo " API:              http://$(_HOST)/api"
 	@echo " API (direct):     http://$(_HOST):8000"
-	@echo " Traefik Dashboard: http://$(_HOST):8080"
+	@echo " Traefik Dashboard: disabled (set insecure: true in traefik.yml to re-enable)"
 	@echo "============================================"
 	@echo ""
 	@echo "Auth: token-based (run 'make token' to create one)"
@@ -60,7 +60,7 @@ init-auth: .env ## First-time setup: core + Logto SSO (~650MB)
 	@echo " UI:               http://$(_HOST)"
 	@echo " API:              http://$(_HOST)/api"
 	@echo " Logto Admin:      http://$(_HOST):3002"
-	@echo " Traefik Dashboard: http://$(_HOST):8080"
+	@echo " Traefik Dashboard: disabled (set insecure: true in traefik.yml to re-enable)"
 	@echo "============================================"
 	@echo ""
 	@echo "Next: Open Logto Admin to create an application and get your Client ID."
@@ -83,7 +83,7 @@ init-zitadel: .env ## First-time setup: core + Zitadel SSO (~1.3GB)
 	@echo " UI:               http://$(_HOST)"
 	@echo " API:              http://$(_HOST)/api"
 	@echo " Zitadel Console:  http://$(_HOST)/ui/console/"
-	@echo " Traefik Dashboard: http://$(_HOST):8080"
+	@echo " Traefik Dashboard: disabled (set insecure: true in traefik.yml to re-enable)"
 	@echo "============================================"
 	@echo ""
 	@echo "Next: Run 'bash scripts/setup-zitadel.sh' to configure OIDC."
@@ -105,7 +105,7 @@ init-full: .env ## First-time setup: ALL services (~2GB) — Logto SSO, logging,
 	@echo " UI:               http://$(_HOST)"
 	@echo " API:              http://$(_HOST)/api"
 	@echo " Logto Admin:      http://$(_HOST):3002"
-	@echo " Traefik Dashboard: http://$(_HOST):8080"
+	@echo " Traefik Dashboard: disabled (set insecure: true in traefik.yml to re-enable)"
 	@echo " Grafana:          http://$(_HOST):3003"
 	@echo " MinIO Console:    http://$(_HOST):9001"
 	@echo " Registry:         http://$(_HOST):5000"
@@ -115,7 +115,27 @@ init-full: .env ## First-time setup: ALL services (~2GB) — Logto SSO, logging,
 
 .env:
 	cp .env.example .env
-	@echo "Created .env from .env.example — edit with your values."
+	@echo "Generating secure random secrets..."
+	@SECRET=$$(openssl rand -base64 32) && sed -i.bak "s|ENGINE_SECRET_KEY=change-me-to-a-random-string|ENGINE_SECRET_KEY=$$SECRET|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|POSTGRES_PASSWORD=engine|POSTGRES_PASSWORD=$$SECRET|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|MINIO_ACCESS_KEY=engine|MINIO_ACCESS_KEY=$$(openssl rand -hex 12)|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|MINIO_SECRET_KEY=engine-secret|MINIO_SECRET_KEY=$$SECRET|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|GRAFANA_PASSWORD=admin|GRAFANA_PASSWORD=$$SECRET|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|ZITADEL_DB_PASSWORD=zitadel|ZITADEL_DB_PASSWORD=$$SECRET|" .env
+	@python3 -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(32)))" | xargs -I{} sed -i.bak "s|ZITADEL_MASTERKEY=MasterkeyNeedsToHave32Characters|ZITADEL_MASTERKEY={}|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|REGISTRY_PASSWORD=change-me-registry-password|REGISTRY_PASSWORD=$$SECRET|" .env
+	@rm -f .env.bak
+	@echo "Created .env with auto-generated secrets."
+
+.PHONY: _ensure-registry-auth
+_ensure-registry-auth:
+	@if [ -n "$$(docker compose ps -q registry 2>/dev/null)" ]; then \
+		REGISTRY_USERNAME=$${REGISTRY_USERNAME:-admin}; \
+		REGISTRY_PASSWORD=$${REGISTRY_PASSWORD:-$$(openssl rand -base64 24)}; \
+		docker compose exec -T registry sh -c "apk add --no-cache apache2-utils > /dev/null 2>&1 && htpasswd -Bbn $$REGISTRY_USERNAME $$REGISTRY_PASSWORD > /auth/htpasswd" 2>/dev/null || \
+		docker run --rm -v adhara-engine_registry-auth:/auth registry:2 sh -c "apk add --no-cache apache2-utils > /dev/null 2>&1 && htpasswd -Bbn $$REGISTRY_USERNAME $$REGISTRY_PASSWORD > /auth/htpasswd"; \
+		echo "Registry auth configured for user: $$REGISTRY_USERNAME"; \
+	fi
 
 up: ## Start core services
 	docker compose up -d

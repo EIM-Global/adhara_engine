@@ -4,7 +4,7 @@
 
 api:
   dashboard: true
-  insecure: true  # Dashboard at :8080 without auth (dev only)
+  insecure: false
 
 entryPoints:
   web:

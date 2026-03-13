@@ -61,8 +61,6 @@ class SiteResponse(BaseModel):
     deploy_target: str
     deploy_region: str | None
     custom_domains: list | None
-    runtime_env: dict | None
-    build_env: dict | None
     health_check_path: str
     status: str
     current_deployment_id: uuid.UUID | None
@@ -82,6 +80,11 @@ class SiteResponse(BaseModel):
     last_health_check: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class SiteDetailResponse(SiteResponse):
+    runtime_env: dict | None
+    build_env: dict | None
 
 
 class EnvVarSet(BaseModel):

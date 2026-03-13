@@ -31,6 +31,7 @@ from app.schemas.site import (
     EnvVarResponse,
     PortUpdate,
     SiteCreate,
+    SiteDetailResponse,
     SiteResponse,
     SiteUpdate,
 )
@@ -136,7 +137,7 @@ async def list_sites(
     )
 
 
-@router.get("/api/v1/sites/{site_id}", response_model=SiteResponse)
+@router.get("/api/v1/sites/{site_id}", response_model=SiteDetailResponse)
 async def get_site(
     site_id: uuid.UUID,
     db: Session = Depends(get_db),

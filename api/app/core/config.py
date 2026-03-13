@@ -8,15 +8,15 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Database
-    database_url: str = "postgresql://engine:engine@db:5432/adhara_engine"
+    database_url: str = ""
 
     # Redis
     redis_url: str = "redis://redis:6379"
 
     # MinIO
     minio_endpoint: str = "minio:9000"
-    minio_access_key: str = "engine"
-    minio_secret_key: str = "engine-secret"
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
     minio_secure: bool = False
 
     # OIDC provider (Logto, Zitadel, or any OIDC-compliant provider)
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     oidc_issuer: str = "http://localhost:3001"
     oidc_jwks_path: str = "/oidc/jwks"
     oidc_userinfo_path: str = "/oidc/me"
+    oidc_client_id: str = ""
 
     # Legacy Zitadel aliases (used when --profile zitadel is active)
     zitadel_domain: str = ""
@@ -36,7 +37,7 @@ class Settings(BaseSettings):
     port_range_end: int = 5000
 
     # Engine
-    engine_secret_key: str = "dev-secret-change-me"
+    engine_secret_key: str = ""
 
     # Platform domain for auto-generated site subdomains
     # Sites get: {slug}.{workspace}.{tenant}.{platform_domain}
@@ -55,3 +56,39 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+_KNOWN_WEAK_SECRETS = {
+    "dev-secret-change-me",
+    "change-me-to-a-random-string",
+    "engine",
+    "engine-secret",
+    "admin",
+    "MasterkeyNeedsToHave32Characters",
+    "zitadel",
+}
+
+
+def validate_secrets():
+    """Validate that required secrets are set and not using known weak values.
+
+    Called during application startup. Raises SystemExit if critical secrets
+    are missing or insecure.
+    """
+    errors = []
+
+    checks = [
+        ("ENGINE_SECRET_KEY", settings.engine_secret_key),
+        ("DATABASE_URL", settings.database_url),
+    ]
+
+    for name, value in checks:
+        if not value:
+            errors.append(f"  {name} is not set")
+        elif value in _KNOWN_WEAK_SECRETS:
+            errors.append(f"  {name} is using a known weak default value")
+
+    if errors:
+        msg = "SECURITY: Cannot start with insecure configuration:\n" + "\n".join(errors)
+        msg += "\n\nSet proper secrets in .env or environment variables."
+        raise SystemExit(msg)

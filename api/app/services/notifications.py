@@ -11,7 +11,10 @@ The health monitor already calls this for health events.
 Pipeline stages call this on deploy events.
 """
 
+import ipaddress
 import logging
+import socket
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy.orm import Session
@@ -20,6 +23,50 @@ from app.models.notification_config import NotificationConfig
 from app.models.site import Site
 
 logger = logging.getLogger(__name__)
+
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def validate_webhook_url(url: str) -> None:
+    """Validate a webhook URL is safe to request.
+
+    Blocks:
+    - Non-HTTPS URLs
+    - RFC1918, link-local, loopback addresses
+    - URLs that resolve to internal IPs
+
+    Raises ValueError if the URL is not safe.
+    """
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("https",):
+        raise ValueError(f"Webhook URLs must use HTTPS (got {parsed.scheme})")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("Invalid webhook URL: no hostname")
+
+    # Resolve hostname and check against blocked networks
+    try:
+        addrs = socket.getaddrinfo(hostname, None)
+        for _, _, _, _, sockaddr in addrs:
+            ip = ipaddress.ip_address(sockaddr[0])
+            for network in _BLOCKED_NETWORKS:
+                if ip in network:
+                    raise ValueError(
+                        "Webhook URL resolves to blocked internal address"
+                    )
+    except socket.gaierror:
+        raise ValueError(f"Cannot resolve webhook hostname: {hostname}")
 
 
 async def notify(
@@ -74,6 +121,7 @@ async def notify(
 
 async def _send_webhook(config: NotificationConfig, event: str, payload: dict):
     """Send a webhook POST with event data."""
+    validate_webhook_url(config.target)
     async with httpx.AsyncClient(timeout=10.0) as client:
         await client.post(
             config.target,
@@ -88,6 +136,7 @@ async def _send_webhook(config: NotificationConfig, event: str, payload: dict):
 
 async def _send_slack(config: NotificationConfig, event: str, payload: dict):
     """Send a Slack incoming webhook message."""
+    validate_webhook_url(config.target)
     # Map events to emoji and color
     emoji_map = {
         "deploy_started": ":rocket:",

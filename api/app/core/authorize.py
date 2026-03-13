@@ -65,6 +65,12 @@ async def authorize(
 
         # Check if role grants the requested permission
         role_perms = ROLE_PERMISSIONS.get(membership.role, set())
+        # For API tokens, intersect with token scopes
+        if user.get("token_type") == "api_token":
+            token_scopes = user.get("scopes") or []
+            if token_scopes:
+                scope_perms = {Permission(s) for s in token_scopes if s in Permission._value2member_map_}
+                role_perms = role_perms & scope_perms
         if permission in role_perms:
             return membership  # AUTHORIZED
 
@@ -94,6 +100,12 @@ async def authorize_any(
         ):
             continue
         role_perms = ROLE_PERMISSIONS.get(membership.role, set())
+        # For API tokens, intersect with token scopes
+        if user.get("token_type") == "api_token":
+            token_scopes = user.get("scopes") or []
+            if token_scopes:
+                scope_perms = {Permission(s) for s in token_scopes if s in Permission._value2member_map_}
+                role_perms = role_perms & scope_perms
         if any(p in role_perms for p in permissions):
             return membership
 

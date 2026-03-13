@@ -92,6 +92,14 @@ async def create_notification(
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
 
+    # Validate webhook URL if type is webhook or slack
+    if data.type in ("webhook", "slack"):
+        from app.services.notifications import validate_webhook_url
+        try:
+            validate_webhook_url(data.target)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     config = NotificationConfig(
         site_id=site.id,
         type=data.type,

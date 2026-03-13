@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.routers import (
     tenants,
@@ -32,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.config import validate_secrets
+    validate_secrets()
+
     # Startup: sync site statuses with actual container state
     print("[adhara] Syncing site statuses with Docker...", flush=True)
     db = SessionLocal()
@@ -50,6 +54,9 @@ app = FastAPI(
     description="Multi-tenant frontend deployment platform. Copyright 2026 EIM Global Solutions, LLC.",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
+    openapi_url="/openapi.json" if settings.debug else None,
 )
 
 app.include_router(tenants.router)
@@ -69,19 +76,36 @@ app.include_router(platform.router)
 app.include_router(registry.router)
 
 
+# ── Rate Limiting ─────────────────────────────────────────────────
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
+
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=["10/second"],
+    )
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
+except ImportError:
+    pass  # slowapi not installed — rate limiting disabled
+
+
 @app.get("/health")
 async def health():
-    return {
-        "status": "healthy",
-        "service": "adhara-engine-api",
-        "version": "0.1.0",
-    }
+    result = {"status": "healthy", "service": "adhara-engine-api"}
+    if settings.debug:
+        result["version"] = settings.version
+    return result
 
 
 @app.get("/")
 async def root():
-    return {
-        "name": "Adhara Engine",
-        "version": "0.1.0",
-        "docs": "/docs",
-    }
+    result = {"name": "Adhara Engine"}
+    if settings.debug:
+        result["version"] = settings.version
+        result["docs"] = "/docs"
+    return result

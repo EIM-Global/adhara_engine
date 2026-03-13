@@ -26,16 +26,11 @@ export function useTokenAuth() {
   return useContext(TokenAuthContext)
 }
 
-const TOKEN_KEY = 'adhara_api_token'
-
 function TokenAuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem(TOKEN_KEY)
-  )
+  const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    // Quick validation: try hitting /health with the stored token
     if (token) {
       setTokenGetter(() => token)
     } else {
@@ -45,13 +40,11 @@ function TokenAuthProvider({ children }: { children: ReactNode }) {
   }, [token])
 
   const login = (newToken: string) => {
-    localStorage.setItem(TOKEN_KEY, newToken)
     setToken(newToken)
     setTokenGetter(() => newToken)
   }
 
   const logout = () => {
-    localStorage.removeItem(TOKEN_KEY)
     setToken(null)
     setTokenGetter(null)
   }

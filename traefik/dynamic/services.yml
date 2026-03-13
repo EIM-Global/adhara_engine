@@ -5,6 +5,19 @@
 # has API version issues with Docker Engine 27+).
 
 http:
+  middlewares:
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        customResponseHeaders:
+          X-Permitted-Cross-Domain-Policies: "none"
+
   routers:
     # ── UI (Dashboard) ────────────────────────────────────────
     # Catch-all on port 80 — serves the dashboard at the root
@@ -12,6 +25,7 @@ http:
       rule: "PathPrefix(`/`)"
       entryPoints: [web]
       service: ui
+      middlewares: [security-headers]
       priority: 1
 
     # ── API ────────────────────────────────────────────────────
@@ -19,6 +33,7 @@ http:
       rule: "PathPrefix(`/api`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/health`)"
       entryPoints: [web]
       service: api-backend
+      middlewares: [security-headers]
       priority: 100
 
     # ── Zitadel (profile: zitadel) — routed through port 80 ──
@@ -28,12 +43,14 @@ http:
       rule: "PathPrefix(`/oauth`) || PathPrefix(`/oidc`) || PathPrefix(`/.well-known`) || PathPrefix(`/ui/console`) || PathPrefix(`/debug`) || PathPrefix(`/management/v1`) || PathPrefix(`/admin/v1`) || PathPrefix(`/auth/v1`) || PathPrefix(`/v2`) || PathPrefix(`/caos`) || PathPrefix(`/zitadel`)"
       entryPoints: [web]
       service: zitadel-api
+      middlewares: [security-headers]
       priority: 200
 
     zitadel-login-web:
       rule: "PathPrefix(`/ui/v2/login`)"
       entryPoints: [web]
       service: zitadel-login
+      middlewares: [security-headers]
       priority: 300
 
     # Legacy port 8081 routes (kept for backward compat / SSH tunnel access)
@@ -41,12 +58,14 @@ http:
       rule: "PathPrefix(`/`)"
       entryPoints: [zitadel]
       service: zitadel-api
+      middlewares: [security-headers]
       priority: 100
 
     zitadel-login-legacy:
       rule: "PathPrefix(`/ui/v2/login`)"
       entryPoints: [zitadel]
       service: zitadel-login
+      middlewares: [security-headers]
       priority: 200
 
   services:

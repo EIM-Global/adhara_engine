@@ -13,9 +13,13 @@ import os
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.auth import require_auth
+from app.core.authorize import authorize
 from app.core.config import settings
+from app.core.database import get_db
+from app.core.permissions import Permission
 from app.services.build_drivers import DRIVERS as BUILD_DRIVERS, DEFAULT_DRIVER
 from app.services.scan_drivers import SCANNERS, DEFAULT_SCANNER
 
@@ -231,8 +235,9 @@ def _resolve_registry_host() -> str:
 
 
 @router.get("/api/v1/platform/config", response_model=PlatformConfig)
-async def get_platform_config(user: dict = Depends(require_auth)):
+async def get_platform_config(user: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """Get current platform configuration."""
+    await authorize(user, Permission.PLATFORM_DASHBOARD, "platform", None, db)
     return PlatformConfig(
         platform_domain=settings.platform_domain,
         engine_public_ip=settings.engine_public_ip,
@@ -244,6 +249,7 @@ async def get_platform_config(user: dict = Depends(require_auth)):
 async def update_platform_config(
     data: PlatformConfigUpdate,
     user: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
 ):
     """Update platform configuration.
 
@@ -251,6 +257,7 @@ async def update_platform_config(
     Note: these are in-memory changes. To persist across restarts,
     update the .env file or environment variables.
     """
+    await authorize(user, Permission.PLATFORM_SETTINGS, "platform", None, db)
     if data.platform_domain is not None:
         settings.platform_domain = data.platform_domain
     if data.engine_public_ip is not None:

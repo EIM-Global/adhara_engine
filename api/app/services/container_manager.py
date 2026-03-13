@@ -47,8 +47,8 @@ async def deploy_site(db: Session, site_id: str) -> Deployment:
     runtime_env = {}
     if workspace.adhara_api_url:
         runtime_env["ADHARA_API_URL"] = workspace.adhara_api_url
-    if workspace.adhara_api_key:
-        runtime_env["ADHARA_API_KEY"] = workspace.adhara_api_key
+    # NOTE: Workspace API key is no longer injected into containers.
+    # Use per-deployment scoped tokens instead (see PR-8/PR-16).
     runtime_env["ADHARA_PUBLIC_URL"] = f"http://localhost:{site.host_port}"
     # Site-level env vars override workspace defaults
     runtime_env.update(site.runtime_env or {})

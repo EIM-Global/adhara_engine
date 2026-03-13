@@ -5,28 +5,16 @@ import os
 import docker
 from docker.errors import NotFound
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
 
 from app.core.auth import require_auth
+from app.core.authorize import authorize
+from app.core.database import get_db
+from app.core.permissions import Permission
 
 router = APIRouter(tags=["services"])
 
 _client = docker.from_env()
-
-# Credential mappings: service_name -> list of { label, username_env, password_env, username_default }
-SERVICE_CREDENTIALS = {
-    "grafana": {
-        "username": "admin",
-        "password_env": "GF_SECURITY_ADMIN_PASSWORD",
-    },
-    "minio": {
-        "username_env": "MINIO_ROOT_USER",
-        "password_env": "MINIO_ROOT_PASSWORD",
-    },
-    "db": {
-        "username": "engine",
-        "password_env": "POSTGRES_PASSWORD",
-    },
-}
 
 # Metadata for known Adhara Engine services
 SERVICE_META = {
@@ -149,28 +137,6 @@ def _container_to_service(container) -> dict:
             for b in bindings:
                 ports[port_spec] = f"{b.get('HostIp', '0.0.0.0')}:{b['HostPort']}"
 
-    # Extract credentials if this service has them
-    credentials = None
-    cred_config = SERVICE_CREDENTIALS.get(name)
-    if cred_config:
-        # Parse container env vars into a dict
-        container_env = {}
-        for env_str in (container.attrs.get("Config", {}).get("Env", []) or []):
-            if "=" in env_str:
-                k, v = env_str.split("=", 1)
-                container_env[k] = v
-
-        username = cred_config.get("username")
-        if not username and cred_config.get("username_env"):
-            username = container_env.get(cred_config["username_env"], "—")
-
-        password = None
-        if cred_config.get("password_env"):
-            password = container_env.get(cred_config["password_env"])
-
-        if username:
-            credentials = {"username": username, "password": password}
-
     return {
         "name": name,
         "container_name": container.name.lstrip("/"),
@@ -184,14 +150,14 @@ def _container_to_service(container) -> dict:
         "ports": ports,
         "management_url": meta.get("management_url"),
         "management_label": meta.get("management_label"),
-        "credentials": credentials,
         "started_at": container.attrs.get("State", {}).get("StartedAt"),
     }
 
 
 @router.get("/api/v1/services")
-def list_services():
+async def list_services(user: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """List all Adhara Engine Docker Compose services with status."""
+    await authorize(user, Permission.PLATFORM_SETTINGS, "platform", None, db)
     containers = _client.containers.list(
         all=True,
         filters={"label": ["com.docker.compose.project=adhara-engine"]},
@@ -209,8 +175,9 @@ def list_services():
 
 
 @router.get("/api/v1/services/{service_name}/logs")
-def get_service_logs(service_name: str, tail: int = Query(default=200, le=2000)):
+async def get_service_logs(service_name: str, tail: int = Query(default=200, le=2000), user: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """Get logs for a specific Docker Compose service."""
+    await authorize(user, Permission.PLATFORM_SETTINGS, "platform", None, db)
     containers = _client.containers.list(
         all=True,
         filters={"label": ["com.docker.compose.project=adhara-engine"]},

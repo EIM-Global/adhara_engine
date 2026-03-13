@@ -125,12 +125,29 @@ async def stream_pipeline(
 async def _pipeline_event_generator(pipeline_run_id: str):
     """Generate SSE events by polling pipeline state."""
     import json
+    import time as _time
 
     last_status = None
     last_stage_statuses = {}
     last_log_lengths = {}
+    start_time = _time.monotonic()
+    max_duration = 1800  # 30 minutes
+    keepalive_interval = 30  # seconds
+    last_keepalive = start_time
 
     while True:
+        # Enforce maximum stream duration
+        elapsed = _time.monotonic() - start_time
+        if elapsed > max_duration:
+            yield _sse_event("timeout", {"message": "Stream timeout after 30 minutes"})
+            return
+
+        # Send keepalive ping
+        now = _time.monotonic()
+        if now - last_keepalive > keepalive_interval:
+            yield ": keepalive\n\n"
+            last_keepalive = now
+
         db = SessionLocal()
         try:
             run = (
