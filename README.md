@@ -5,6 +5,26 @@
 
 A self-hosted, multi-tenant deployment platform for frontend websites. Manage tenants, workspaces, and sites through a web dashboard, CLI, or API — all backed by Docker containers with automatic routing, OIDC authentication, and observability.
 
+## Where It Runs
+
+Adhara Engine is designed to run **anywhere Docker runs** — online or offline, cloud or closet.
+
+| Environment | Example | Internet Required? |
+|-------------|---------|-------------------|
+| **Your laptop** | macOS / Linux / WSL development machine | No |
+| **Office LAN** | A server on your local network serving internal tools | No |
+| **Air-gapped intranet** | Government, military, or compliance-restricted networks | No |
+| **Mobile / edge** | A NUC or Raspberry Pi at a remote site or event | No |
+| **Cloud VM** | DigitalOcean, GCP, AWS, Hetzner, etc. | Yes (for SSH + HTTPS certs) |
+
+The core engine (~500 MB) has **zero external dependencies at runtime** — no SaaS APIs, no phone-home, no license servers. Once the Docker images are built, everything runs locally. DNS, SSL, and SSO are optional layers you add when you need them.
+
+**Typical use cases:**
+- Host client websites from a single VPS without paying per-site platform fees
+- Run an internal tool platform on a company LAN with no public internet exposure
+- Deploy preview environments on a dev machine before pushing to production
+- Operate a self-contained deployment platform in air-gapped or compliance-restricted environments
+
 ## Architecture
 
 ```
@@ -41,14 +61,42 @@ A self-hosted, multi-tenant deployment platform for frontend websites. Manage te
 Optional (for CLI usage):
 - **Python 3.11+** and **uv** (for the CLI tool)
 
-## New Server Setup
+## Setup
 
-Step-by-step guides for provisioning a server and installing Adhara Engine from scratch.
+Pick the environment that matches where you want to run. All three paths end at the same place: a running Adhara Engine you can access in your browser.
 
-- [DigitalOcean](#digitalocean-setup) — Simplest path, recommended for most users
-- [Google Cloud Platform](#google-cloud-platform-setup) — Additional firewall/IAM steps
+- [Local Machine](#local-machine-setup) — Your laptop or a machine on your LAN (fastest to get started)
+- [DigitalOcean](#digitalocean-setup) — Cloud VPS, simplest remote path
+- [Google Cloud Platform](#google-cloud-platform-setup) — Cloud VM with additional firewall/IAM steps
 
-Both guides end at the same place: a running Adhara Engine you can access in your browser.
+---
+
+### Local Machine Setup
+
+Works on macOS, Linux, or WSL. No server provisioning — just Docker and a terminal.
+
+**Prerequisites:** Docker (Docker Desktop, OrbStack, Colima, or Podman), Git, Make
+
+```bash
+# 1. Clone the repo
+git clone git@github.com:EIM-Global/adhara_engine.git
+cd adhara_engine
+
+# 2. Build and start (creates .env, generates secrets, runs migrations)
+make init
+
+# 3. Create an API token to log in
+make token
+
+# 4. Open the dashboard
+open http://engine.localhost
+```
+
+That's it. The engine is running at **http://engine.localhost**.
+
+> **LAN access:** Other machines on your network can reach the dashboard at `http://YOUR_LOCAL_IP`. Set `ADHARA_HOST=YOUR_LOCAL_IP` in `.env` before running `make init` if you want hostname routing to work for LAN clients.
+
+> **Offline / air-gapped:** If you're deploying without internet, clone the repo and pre-pull the Docker images on a connected machine first, then transfer via USB or internal registry.
 
 ---
 
@@ -235,25 +283,14 @@ Open `http://EXTERNAL_IP` in your browser (find the external IP with `gcloud com
 - **SSO:** See [Authentication Modes](#authentication-modes)
 - **Full GCP guide:** See [docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md) for IAP tunnels, service accounts, and advanced networking
 
-## Quickstart (Local Development)
+## Quickstart
 
 ```bash
-# 1. Clone and enter the repo
 git clone git@github.com:EIM-Global/adhara_engine.git && cd adhara_engine
-
-# 2. First-time setup — copies .env, builds images, starts everything,
-#    and runs database migrations automatically
-make init
-
-# 3. Create an API token to log in
-make token
-
-# 4. (Optional) Set up SSO instead of token auth
-#    Logto (lightweight):  make init-auth
-#    Zitadel (enterprise): make init-zitadel
+make init && make token
 ```
 
-That's it. Open **http://engine.localhost** in your browser.
+Open **http://engine.localhost** and log in with the token. See [Local Machine Setup](#local-machine-setup) for details or [Setup](#setup) for cloud deployment guides.
 
 ## Deployment Profiles
 
