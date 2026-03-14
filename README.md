@@ -3,7 +3,36 @@
 > Copyright (c) 2026 EIM Global Solutions, LLC. All rights reserved.
 > Licensed under a proprietary license. See [LICENSE](LICENSE) for details.
 
-A self-hosted, multi-tenant deployment platform for frontend websites. Manage tenants, workspaces, and sites through a web dashboard, CLI, or API — all backed by Docker containers with automatic routing, OIDC authentication, and observability.
+A self-hosted, multi-tenant deployment platform for web applications. Deploy sites through a web dashboard, CLI, or API — backed by Docker containers with automatic routing, SSL, and authentication.
+
+## Why Adhara Engine?
+
+Getting code from your laptop to a running website is harder than it should be. Even for a simple app, you're wrangling Dockerfiles, nginx configs, SSL certificates, DNS records, port management, reverse proxies, and deploy scripts. Multiply that by 5 or 10 sites and you're spending more time on infrastructure than on building.
+
+**Adhara Engine handles all of that so you don't have to.**
+
+| Without Adhara Engine | With Adhara Engine |
+|----------------------|-------------------|
+| Write Dockerfiles, build images, push to a registry manually | Push code or an image — the engine builds and deploys it |
+| Configure nginx/Traefik routing for each site by hand | Automatic routing — every site gets a hostname instantly |
+| Manage SSL certs with certbot, cron jobs, renewal scripts | Auto-SSL via Let's Encrypt — zero configuration |
+| Track which port each app is on, avoid conflicts | Automatic port assignment from a managed pool |
+| Roll back by SSH-ing in and restarting old containers | One-click rollback from the dashboard or CLI |
+| No visibility into what's running or why something broke | Built-in logs, health checks, and auto-healing |
+
+**Who is this for?**
+
+- **Freelancers and agencies** — Host all your client sites on one server instead of paying per-site on Vercel, Netlify, or Railway
+- **Small teams** — Run internal tools on your office network without exposing them to the internet
+- **Enterprises** — Deploy in air-gapped or compliance-restricted environments with full data ownership
+- **Anyone tired of deploy scripts** — If you've ever written a `deploy.sh` that SSHs into a server and runs `docker compose up`, this replaces that
+
+The engine is self-contained. There's some initial setup (covered step-by-step below), but once it's running, deploying a new site is as simple as:
+
+```bash
+adhara-engine site create --workspace my-team/production --name "My App" --port 3000
+adhara-engine site deploy my-team/production/my-app
+```
 
 ## Where It Runs
 
@@ -87,86 +116,6 @@ graph TB
     style Data fill:#0f3460,stroke:#818cf8,color:#e2e8f0
     style Sites fill:#1a1a2e,stroke:#22c55e,color:#e2e8f0
     style Optional fill:#1e1e3f,stroke:#a78bfa,color:#e2e8f0,stroke-dasharray: 5 5
-```
-
-### Deployment Pipeline
-
-How code goes from push to live site:
-
-```mermaid
-flowchart LR
-    subgraph Trigger["Trigger"]
-        Push["Git Push /<br/>Manual Deploy"]
-    end
-
-    subgraph Pipeline["Pipeline Engine (ARQ)"]
-        Clone["📥 Clone"]
-        Scan["🔍 Scan<br/>(optional)"]
-        Build["🔨 Build"]
-        PushImg["📤 Push to<br/>Registry"]
-        Deploy["🚀 Deploy"]
-    end
-
-    subgraph Drivers["Build Drivers"]
-        LD["Local Docker"]
-        BK["BuildKit"]
-        GCP["GCP Cloud Build"]
-        AWS["AWS CodeBuild"]
-    end
-
-    subgraph BlueGreen["Blue-Green Deploy"]
-        Green["🟢 Start Green<br/>Container"]
-        Health["❤️ Health Check"]
-        Swap["🔀 Swap Traffic<br/>via Traefik"]
-        Drain["⏳ Drain Blue<br/>Container"]
-    end
-
-    Push --> Clone --> Scan --> Build --> PushImg --> Deploy
-    Build --> LD & BK & GCP & AWS
-    Deploy --> Green --> Health --> Swap --> Drain
-
-    style Trigger fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
-    style Pipeline fill:#1a1a2e,stroke:#3b82f6,color:#e2e8f0
-    style Drivers fill:#1e1e3f,stroke:#a78bfa,color:#e2e8f0
-    style BlueGreen fill:#0f3460,stroke:#22c55e,color:#e2e8f0
-```
-
-### Authentication Flow
-
-Three auth modes — all feeding into the same RBAC system:
-
-```mermaid
-flowchart TB
-    Request["🌐 Incoming Request<br/>Authorization: Bearer &lt;token&gt;"]
-
-    Request --> Detect{"Token prefix?"}
-
-    Detect -->|"ae_*"| APIToken["🔑 API Token<br/>SHA-256 hash → DB lookup"]
-    Detect -->|"eyJ... (JWT)"| OIDC_JWT["🔐 OIDC JWT<br/>JWKS signature check"]
-    Detect -->|"Other"| OIDC_Opaque["🔐 Opaque Token<br/>Userinfo endpoint"]
-
-    subgraph Providers["OIDC Providers (pick one or none)"]
-        None["Token-only<br/>(no SSO)"]
-        Logto["Logto<br/>(lightweight)"]
-        Zitadel["Zitadel<br/>(enterprise)"]
-    end
-
-    APIToken --> Claims["✅ User Claims"]
-    OIDC_JWT --> Claims
-    OIDC_Opaque --> Claims
-
-    Claims --> Authorize["🛡️ authorize()<br/>DB-backed RBAC"]
-    Authorize --> Allow["✅ Allowed"]
-    Authorize --> Deny["❌ 403 Denied"]
-
-    OIDC_JWT -.-> Providers
-    OIDC_Opaque -.-> Providers
-
-    style Request fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
-    style Claims fill:#0f3460,stroke:#22c55e,color:#e2e8f0
-    style Providers fill:#1e1e3f,stroke:#a78bfa,color:#e2e8f0,stroke-dasharray: 5 5
-    style Allow fill:#166534,stroke:#22c55e,color:#e2e8f0
-    style Deny fill:#7f1d1d,stroke:#ef4444,color:#e2e8f0
 ```
 
 ### Where It Runs
@@ -955,6 +904,92 @@ Once running, these services are available:
 | [Engine Integration](docs/ENGINE_INTEGRATION_GUIDE.md) | How to Dockerize apps for the engine |
 | [GCP Deployment](docs/GCP_DEPLOYMENT.md) | Cloud deployment to Google Cloud |
 | [Security Hardening](scripts/adhara-secure.sh) | UFW, HTTPS, port lockdown script |
+
+## How It Works (Deep Dive)
+
+These diagrams explain the internals — how deployments flow through the system and how authentication works. You don't need to understand these to use Adhara Engine, but they're helpful if you want to know what's happening under the hood.
+
+### Deployment Pipeline
+
+How code goes from push to live site — with zero-downtime blue-green deploys:
+
+```mermaid
+flowchart LR
+    subgraph Trigger["Trigger"]
+        Push["Git Push /<br/>Manual Deploy"]
+    end
+
+    subgraph Pipeline["Pipeline Engine (ARQ)"]
+        Clone["📥 Clone"]
+        Scan["🔍 Scan<br/>(optional)"]
+        Build["🔨 Build"]
+        PushImg["📤 Push to<br/>Registry"]
+        Deploy["🚀 Deploy"]
+    end
+
+    subgraph Drivers["Build Drivers"]
+        LD["Local Docker"]
+        BK["BuildKit"]
+        GCP["GCP Cloud Build"]
+        AWS["AWS CodeBuild"]
+    end
+
+    subgraph BlueGreen["Blue-Green Deploy"]
+        Green["🟢 Start Green<br/>Container"]
+        Health["❤️ Health Check"]
+        Swap["🔀 Swap Traffic<br/>via Traefik"]
+        Drain["⏳ Drain Blue<br/>Container"]
+    end
+
+    Push --> Clone --> Scan --> Build --> PushImg --> Deploy
+    Build --> LD & BK & GCP & AWS
+    Deploy --> Green --> Health --> Swap --> Drain
+
+    style Trigger fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Pipeline fill:#1a1a2e,stroke:#3b82f6,color:#e2e8f0
+    style Drivers fill:#1e1e3f,stroke:#a78bfa,color:#e2e8f0
+    style BlueGreen fill:#0f3460,stroke:#22c55e,color:#e2e8f0
+```
+
+### Authentication Flow
+
+Three auth modes — all feeding into the same RBAC system:
+
+```mermaid
+flowchart TB
+    Request["🌐 Incoming Request<br/>Authorization: Bearer &lt;token&gt;"]
+
+    Request --> Detect{"Token prefix?"}
+
+    Detect -->|"ae_*"| APIToken["🔑 API Token<br/>SHA-256 hash → DB lookup"]
+    Detect -->|"eyJ... (JWT)"| OIDC_JWT["🔐 OIDC JWT<br/>JWKS signature check"]
+    Detect -->|"Other"| OIDC_Opaque["🔐 Opaque Token<br/>Userinfo endpoint"]
+
+    subgraph Providers["OIDC Providers (pick one or none)"]
+        None["Token-only<br/>(no SSO)"]
+        Logto["Logto<br/>(lightweight)"]
+        Zitadel["Zitadel<br/>(enterprise)"]
+    end
+
+    APIToken --> Claims["✅ User Claims"]
+    OIDC_JWT --> Claims
+    OIDC_Opaque --> Claims
+
+    Claims --> Authorize["🛡️ authorize()<br/>DB-backed RBAC"]
+    Authorize --> Allow["✅ Allowed"]
+    Authorize --> Deny["❌ 403 Denied"]
+
+    OIDC_JWT -.-> Providers
+    OIDC_Opaque -.-> Providers
+
+    style Request fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Claims fill:#0f3460,stroke:#22c55e,color:#e2e8f0
+    style Providers fill:#1e1e3f,stroke:#a78bfa,color:#e2e8f0,stroke-dasharray: 5 5
+    style Allow fill:#166534,stroke:#22c55e,color:#e2e8f0
+    style Deny fill:#7f1d1d,stroke:#ef4444,color:#e2e8f0
+```
+
+For the full architecture document including data models, build drivers, health monitoring, and RBAC details, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Troubleshooting
 
