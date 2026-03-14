@@ -14,7 +14,14 @@ from app.core.permissions import Permission
 
 router = APIRouter(tags=["services"])
 
-_client = docker.from_env()
+_client = None
+
+
+def _get_docker_client():
+    global _client
+    if _client is None:
+        _client = docker.from_env()
+    return _client
 
 # Metadata for known Adhara Engine services
 SERVICE_META = {
@@ -158,7 +165,7 @@ def _container_to_service(container) -> dict:
 async def list_services(user: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """List all Adhara Engine Docker Compose services with status."""
     await authorize(user, Permission.PLATFORM_SETTINGS, "platform", None, db)
-    containers = _client.containers.list(
+    containers = _get_docker_client().containers.list(
         all=True,
         filters={"label": ["com.docker.compose.project=adhara-engine"]},
     )
@@ -178,7 +185,7 @@ async def list_services(user: dict = Depends(require_auth), db: Session = Depend
 async def get_service_logs(service_name: str, tail: int = Query(default=200, le=2000), user: dict = Depends(require_auth), db: Session = Depends(get_db)):
     """Get logs for a specific Docker Compose service."""
     await authorize(user, Permission.PLATFORM_SETTINGS, "platform", None, db)
-    containers = _client.containers.list(
+    containers = _get_docker_client().containers.list(
         all=True,
         filters={"label": ["com.docker.compose.project=adhara-engine"]},
     )
@@ -204,7 +211,7 @@ async def get_service_logs(service_name: str, tail: int = Query(default=200, le=
 def restart_service(service_name: str, user: dict = Depends(require_auth)):
     """Restart a specific Docker Compose service container."""
     # Safety: don't allow restarting db without warning
-    containers = _client.containers.list(
+    containers = _get_docker_client().containers.list(
         all=True,
         filters={"label": ["com.docker.compose.project=adhara-engine"]},
     )

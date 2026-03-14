@@ -65,7 +65,13 @@ class LocalDeployTarget(DeployTarget):
     """Deploys containers on the local Docker daemon."""
 
     def __init__(self):
-        self.client = docker.from_env()
+        self._client = None
+
+    @property
+    def client(self):
+        if self._client is None:
+            self._client = docker.from_env()
+        return self._client
 
     async def deploy(self, config: DeployConfig) -> DeployResult:
         """Build or pull image, then create and start a container."""
