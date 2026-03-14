@@ -27,28 +27,169 @@ The core engine (~500 MB) has **zero external dependencies at runtime** — no S
 
 ## Architecture
 
-```
-                        ┌─────────────────────────────┐
-                        │        Traefik :80/:443      │
-                        │   (reverse proxy + auto SSL) │
-                        └──────┬──────────────┬────────┘
-                               │              │
-                  ┌────────────▼──┐    ┌──────▼───────────────────┐
-                  │   UI (React)  │    │  Deployed Site Containers │
-                  │   :5173       │    │  :4001-5000 (auto-routed) │
-                  └──────┬────────┘    └──────────────────────────┘
-                         │
-                  ┌──────▼────────┐
-                  │  API (FastAPI) │
-                  │  :8000         │
-                  └──┬─────┬──────┘
-                     │     │
-          ┌──────────▼┐  ┌─▼──────────┐
-          │ PostgreSQL │  │   Redis    │
-          │ :5432      │  │   :6379    │
-          └────────────┘  └────────────┘
+### System Overview
 
-   Supporting: Logto :3001 │ MinIO :9000 │ Grafana :3003 │ Loki :3100 │ Registry :5000
+```mermaid
+graph TB
+    subgraph Internet["Internet / LAN"]
+        Users["👤 Users & Browsers"]
+    end
+
+    subgraph Engine["Adhara Engine"]
+        Traefik["🔀 Traefik :80/:443<br/>Reverse Proxy + Auto SSL"]
+
+        subgraph Core["Core Services"]
+            UI["⚛️ UI (React)<br/>Dashboard"]
+            API["⚡ API (FastAPI)<br/>:8000"]
+            Worker["⚙️ Worker (ARQ)<br/>Background Jobs"]
+        end
+
+        subgraph Data["Data Layer"]
+            DB[("🐘 PostgreSQL<br/>:5432")]
+            Redis[("🔴 Redis<br/>:6379")]
+        end
+
+        subgraph Sites["Deployed Sites"]
+            S1["📦 Site A<br/>:4001"]
+            S2["📦 Site B<br/>:4002"]
+            S3["📦 Site ...<br/>:400x"]
+        end
+
+        DSP["🔒 Docker Socket Proxy<br/>Container Management"]
+    end
+
+    subgraph Optional["Optional Services (Profiles)"]
+        Auth["🔐 Logto / Zitadel<br/>SSO Provider"]
+        Registry["📋 Docker Registry<br/>Image Storage"]
+        MinIO["💾 MinIO<br/>S3 Storage"]
+        Obs["📊 Grafana + Loki + Alloy<br/>Observability"]
+    end
+
+    Users --> Traefik
+    Traefik --> UI
+    Traefik --> API
+    Traefik --> S1
+    Traefik --> S2
+    Traefik --> S3
+    UI --> API
+    API --> DB
+    API --> Redis
+    Worker --> DB
+    Worker --> Redis
+    Worker --> DSP
+    API --> DSP
+    API -.-> Auth
+    API -.-> MinIO
+    Worker -.-> Registry
+
+    style Engine fill:#1a1a2e,stroke:#3b82f6,color:#e2e8f0
+    style Core fill:#16213e,stroke:#60a5fa,color:#e2e8f0
+    style Data fill:#0f3460,stroke:#818cf8,color:#e2e8f0
+    style Sites fill:#1a1a2e,stroke:#22c55e,color:#e2e8f0
+    style Optional fill:#1e1e3f,stroke:#a78bfa,color:#e2e8f0,stroke-dasharray: 5 5
+```
+
+### Deployment Pipeline
+
+How code goes from push to live site:
+
+```mermaid
+flowchart LR
+    subgraph Trigger["Trigger"]
+        Push["Git Push /<br/>Manual Deploy"]
+    end
+
+    subgraph Pipeline["Pipeline Engine (ARQ)"]
+        Clone["📥 Clone"]
+        Scan["🔍 Scan<br/>(optional)"]
+        Build["🔨 Build"]
+        PushImg["📤 Push to<br/>Registry"]
+        Deploy["🚀 Deploy"]
+    end
+
+    subgraph Drivers["Build Drivers"]
+        LD["Local Docker"]
+        BK["BuildKit"]
+        GCP["GCP Cloud Build"]
+        AWS["AWS CodeBuild"]
+    end
+
+    subgraph BlueGreen["Blue-Green Deploy"]
+        Green["🟢 Start Green<br/>Container"]
+        Health["❤️ Health Check"]
+        Swap["🔀 Swap Traffic<br/>via Traefik"]
+        Drain["⏳ Drain Blue<br/>Container"]
+    end
+
+    Push --> Clone --> Scan --> Build --> PushImg --> Deploy
+    Build --> LD & BK & GCP & AWS
+    Deploy --> Green --> Health --> Swap --> Drain
+
+    style Trigger fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Pipeline fill:#1a1a2e,stroke:#3b82f6,color:#e2e8f0
+    style Drivers fill:#1e1e3f,stroke:#a78bfa,color:#e2e8f0
+    style BlueGreen fill:#0f3460,stroke:#22c55e,color:#e2e8f0
+```
+
+### Authentication Flow
+
+Three auth modes — all feeding into the same RBAC system:
+
+```mermaid
+flowchart TB
+    Request["🌐 Incoming Request<br/>Authorization: Bearer &lt;token&gt;"]
+
+    Request --> Detect{"Token prefix?"}
+
+    Detect -->|"ae_*"| APIToken["🔑 API Token<br/>SHA-256 hash → DB lookup"]
+    Detect -->|"eyJ... (JWT)"| OIDC_JWT["🔐 OIDC JWT<br/>JWKS signature check"]
+    Detect -->|"Other"| OIDC_Opaque["🔐 Opaque Token<br/>Userinfo endpoint"]
+
+    subgraph Providers["OIDC Providers (pick one or none)"]
+        None["Token-only<br/>(no SSO)"]
+        Logto["Logto<br/>(lightweight)"]
+        Zitadel["Zitadel<br/>(enterprise)"]
+    end
+
+    APIToken --> Claims["✅ User Claims"]
+    OIDC_JWT --> Claims
+    OIDC_Opaque --> Claims
+
+    Claims --> Authorize["🛡️ authorize()<br/>DB-backed RBAC"]
+    Authorize --> Allow["✅ Allowed"]
+    Authorize --> Deny["❌ 403 Denied"]
+
+    OIDC_JWT -.-> Providers
+    OIDC_Opaque -.-> Providers
+
+    style Request fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Claims fill:#0f3460,stroke:#22c55e,color:#e2e8f0
+    style Providers fill:#1e1e3f,stroke:#a78bfa,color:#e2e8f0,stroke-dasharray: 5 5
+    style Allow fill:#166534,stroke:#22c55e,color:#e2e8f0
+    style Deny fill:#7f1d1d,stroke:#ef4444,color:#e2e8f0
+```
+
+### Where It Runs
+
+```mermaid
+graph TB
+    subgraph Stack["Adhara Engine Stack<br/>(identical everywhere)"]
+        T["Traefik"] --> U["UI"] & A["API"] & S["Sites"]
+        A --> D["PostgreSQL"] & R["Redis"]
+    end
+
+    Stack --- Laptop["💻 Your Laptop<br/>macOS / Linux / WSL"]
+    Stack --- LAN["🏢 Office LAN<br/>Internal server"]
+    Stack --- AirGap["🔒 Air-Gapped<br/>No internet required"]
+    Stack --- Edge["📡 Edge / Mobile<br/>NUC, Raspberry Pi"]
+    Stack --- Cloud["☁️ Cloud VM<br/>DO, GCP, AWS"]
+
+    style Stack fill:#1a1a2e,stroke:#3b82f6,color:#e2e8f0
+    style Laptop fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style LAN fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style AirGap fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Edge fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
+    style Cloud fill:#1e3a5f,stroke:#60a5fa,color:#e2e8f0
 ```
 
 ## Prerequisites
