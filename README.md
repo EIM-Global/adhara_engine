@@ -43,47 +43,203 @@ Optional (for CLI usage):
 
 ## New Server Setup
 
+Step-by-step guides for provisioning a server and installing Adhara Engine from scratch.
+
+- [DigitalOcean](#digitalocean-setup) — Simplest path, recommended for most users
+- [Google Cloud Platform](#google-cloud-platform-setup) — Additional firewall/IAM steps
+
+Both guides end at the same place: a running Adhara Engine you can access in your browser.
+
+---
+
+### DigitalOcean Setup
+
+#### 1. Create the Droplet
+
+1. Go to **DigitalOcean → Create → Droplets**
+2. Choose **Ubuntu 24.04 LTS**
+3. Select a plan:
+
+| Scale | Droplet | vCPU | RAM | Monthly | Sites |
+|-------|---------|------|-----|---------|-------|
+| Small (testing) | Basic, Regular | 2 | 4 GB | ~$24/mo | 5-15 |
+| Standard | Basic, Regular | 4 | 8 GB | ~$48/mo | 15-50 |
+| Large | Basic, Premium | 8 | 16 GB | ~$96/mo | 50-100+ |
+
+4. Choose a datacenter region close to your users
+5. Under **Authentication**, add your SSH key
+6. Click **Create Droplet** and note the IP address
+
+#### 2. Create a deploy user (don't run as root)
+
+SSH in as root, then create a non-root user with sudo and Docker access:
+
 ```bash
-# Create a New User
+ssh root@YOUR_DROPLET_IP
 
-adduser <username>
+# Create your user
+adduser deploy
+usermod -aG sudo deploy
 
-sudo usermod -aG sudo username
+# Let them use Docker without sudo (installed next step)
+usermod -aG docker deploy
 
-## Login as this new user
+# Set up SSH key for the new user
+mkdir -p /home/deploy/.ssh
+cp ~/.ssh/authorized_keys /home/deploy/.ssh/
+chown -R deploy:deploy /home/deploy/.ssh
+chmod 700 /home/deploy/.ssh
+chmod 600 /home/deploy/.ssh/authorized_keys
 
-mkdir ~/.ssh
+# Log out of root — from now on, always SSH as deploy
+exit
+```
 
-echo "<public key>" > ~/.ssh/authorized_keys
+#### 3. Install Docker
+
+SSH in as your new user:
+
+```bash
+ssh deploy@YOUR_DROPLET_IP
+
+# Install Docker (official method)
+curl -fsSL https://get.docker.com | sh
+
+# Verify Docker works without sudo
+docker run --rm hello-world
+```
+
+> If `docker run` gives a permission error, log out and back in so the `docker` group takes effect.
+
+#### 4. Install Make and clone the repo
+
+```bash
+sudo apt update && sudo apt install -y make git
+
+mkdir -p ~/projects && cd ~/projects
+git clone git@github.com:EIM-Global/adhara_engine.git
+cd adhara_engine
+```
+
+> **Need SSH access to GitHub?** Generate a key with `ssh-keygen -t ed25519`, then add `~/.ssh/id_ed25519.pub` as a deploy key in the GitHub repo settings (read-only is fine).
+
+#### 5. Start the engine
+
+```bash
+# Creates .env with auto-generated secrets, builds images, runs migrations
+make init
+
+# Create an API token to log in
+make token
+```
+
+#### 6. Access the dashboard
+
+Open `http://YOUR_DROPLET_IP` in your browser. Log in with the API token from step 5.
+
+#### 7. (Optional) Set up SSO
+
+See [Authentication Modes](#authentication-modes) below for Logto or Zitadel SSO setup.
+
+#### 8. (Optional) Enable HTTPS
+
+See [Enabling HTTPS](#enabling-https) below to set up a domain with auto-SSL.
+
+#### 9. (Optional) Harden security
+
+```bash
+sudo bash scripts/adhara-secure.sh
+```
+
+This configures UFW firewall rules and locks down internal ports.
+
+---
+
+### Google Cloud Platform Setup
+
+GCP requires additional firewall rules and uses `gcloud` for VM creation. For the full GCP-specific guide (VM sizing, firewall rules, IAP tunnels, service accounts), see **[docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md)**.
+
+#### 1. Create the VM
+
+```bash
+gcloud compute instances create adhara-engine \
+  --zone=us-central1-a \
+  --machine-type=e2-standard-4 \
+  --boot-disk-size=100GB \
+  --boot-disk-type=pd-ssd \
+  --image-family=ubuntu-2404-lts-amd64 \
+  --image-project=ubuntu-os-cloud \
+  --tags=adhara-engine
+```
+
+Or via the Console: **Compute Engine → VM Instances → Create** (Ubuntu 24.04 LTS, 100 GB SSD).
+
+#### 2. Open firewall ports
+
+GCP blocks all inbound traffic by default. You must create firewall rules:
+
+```bash
+# HTTP (required — Let's Encrypt + site traffic)
+gcloud compute firewall-rules create adhara-allow-http \
+  --allow=tcp:80 \
+  --target-tags=adhara-engine \
+  --description="Adhara Engine HTTP"
+
+# HTTPS
+gcloud compute firewall-rules create adhara-allow-https \
+  --allow=tcp:443 \
+  --target-tags=adhara-engine \
+  --description="Adhara Engine HTTPS"
+```
+
+#### 3. Create a deploy user, install Docker, and clone
+
+SSH into the VM:
+
+```bash
+gcloud compute ssh adhara-engine --zone=us-central1-a
+```
+
+Then follow the same steps as DigitalOcean:
+
+```bash
+# Create deploy user (if not using the default GCP user)
+sudo adduser deploy
+sudo usermod -aG sudo deploy
+sudo usermod -aG docker deploy
 
 # Install Docker
-#Follow: https://www.digitalocean.com/community/tutorials/how-to-install-and-use-docker-on-ubuntu-22-04
+curl -fsSL https://get.docker.com | sh
 
-# Make sure you add the new user to the docker group
-sudo usermod -aG docker ${USER}
-
-# Create a server private/public key and upload to GitLab to download code.
-ssh-keygen -t rsa -b 4096 -C "<comment>"
-
-# Copy the Key to Github
-cat ~/.ssh/id_rsa.pub
-
-# Make a projects directory
-mkdir ~/projects
-
-cd ~/projects
-
-git clone git@gitlab.com:eim-internal/adhara-engine.git
-
-# Install Make
-sudo apt install make
+# Install Make and clone
+sudo apt update && sudo apt install -y make git
+mkdir -p ~/projects && cd ~/projects
+git clone git@github.com:EIM-Global/adhara_engine.git
+cd adhara_engine
 ```
+
+> **GCP SSH keys:** If you created a `deploy` user, add your SSH key via **Compute Engine → Metadata → SSH Keys**, or copy it manually as shown in the DigitalOcean section.
+
+#### 4. Start the engine
+
+```bash
+make init
+make token
+```
+
+Open `http://EXTERNAL_IP` in your browser (find the external IP with `gcloud compute instances describe adhara-engine --zone=us-central1-a --format='get(networkInterfaces[0].accessConfigs[0].natIP)'`).
+
+#### 5. Next steps
+
+- **HTTPS:** See [Enabling HTTPS](#enabling-https)
+- **SSO:** See [Authentication Modes](#authentication-modes)
+- **Full GCP guide:** See [docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md) for IAP tunnels, service accounts, and advanced networking
 
 ## Quickstart (Local Development)
 
 ```bash
 # 1. Clone and enter the repo
-git clone <repo-url> && cd adhara_engine
+git clone git@github.com:EIM-Global/adhara_engine.git && cd adhara_engine
 
 # 2. First-time setup — copies .env, builds images, starts everything,
 #    and runs database migrations automatically
@@ -171,68 +327,22 @@ docker compose --profile auth --profile observability up -d
 
 The UI automatically detects which mode to use based on whether `VITE_OIDC_CLIENT_ID` is set in `ui/.env`.
 
-## Production Deployment (VPS / Cloud)
+## Production Profiles
 
-For deploying to a remote server (DigitalOcean, AWS, GCP, etc.):
-
-### Lite Deployment (core only — ~500MB)
-
-Best for small servers or when you just need to host a few sites with token auth:
+After completing the [server setup](#new-server-setup) above (which uses `make init` for the core profile), you can add more services:
 
 ```bash
-# 1. Clone the repo
-git clone <repo-url> && cd adhara_engine
+# Add Logto SSO
+make init-auth
 
-# 2. Create .env and set your server's public IP
-cp .env.example .env
-sed -i "s/^# ADHARA_HOST=.*/ADHARA_HOST=$(curl -s ifconfig.me)/" .env
-
-# 3. Build and start core services (includes database migrations)
-make init
-
-# 4. Create an API token to log in
-make token
-
-# 5. Harden security (UFW firewall + port lockdown)
-sudo bash scripts/adhara-secure.sh
-```
-
-The dashboard is available at `http://<your-server-ip>`. Log in with the API token from step 5.
-
-### Full Deployment (~2GB — SSO, logging, storage, registry)
-
-For production environments that need multi-user SSO, log aggregation, and object storage:
-
-```bash
-# 1. Clone the repo
-git clone <repo-url> && cd adhara_engine
-
-# 2. Create .env and set your server's public IP
-#    ⚠️  ADHARA_HOST must be set BEFORE starting services —
-#    Zitadel bakes this into its database on first boot.
-cp .env.example .env
-sed -i "s/^# ADHARA_HOST=.*/ADHARA_HOST=$(curl -s ifconfig.me)/" .env
-
-# 3. Build and start all services (includes database migrations)
+# Or add everything (Logto SSO + logging + storage + registry)
 make init-full
 
-# 4. Wait for services to be ready
-make status                          # check all containers are "Up"
-
-# 5. Set up Logto SSO (open Admin Console, create an app)
-#    See "Authentication Modes" section below for details
-#    Or use Zitadel instead: make init-zitadel && bash scripts/setup-zitadel.sh
-
-# 6. Rebuild UI to bake in the OIDC config
-docker compose up -d --build ui
-
-# 7. Harden security (UFW firewall + port lockdown)
-sudo bash scripts/adhara-secure.sh
+# Or mix profiles manually
+docker compose --profile auth --profile observability up -d
 ```
 
-The dashboard is available at `http://<your-server-ip>`.
-
-> **Note:** If `setup-zitadel.sh` hangs at "Waiting for Zitadel to be healthy", Zitadel is still bootstrapping. Check progress with `docker compose logs zitadel --tail 10`. First boot typically takes 3-5 minutes.
+See [Deployment Profiles](#deployment-profiles) for the full list of profiles and what each adds.
 
 ### Enabling HTTPS
 
@@ -504,14 +614,12 @@ The CLI lets you manage tenants, workspaces, sites, and deployments from the com
 **Install (requires Python 3.11+ and [uv](https://docs.astral.sh/uv/)):**
 
 ```bash
-# Option 1: Using make (creates a venv in cli/.venv)
+# Option 1: Install globally (adds adhara-engine to your PATH)
+make install
+
+# Option 2: Install in a local venv
 make cli-install
 source cli/.venv/bin/activate
-
-# Option 2: Manual install with uv
-cd cli
-uv venv && source .venv/bin/activate
-uv pip install -e .
 ```
 
 **Configure the CLI to talk to your engine:**
@@ -575,7 +683,7 @@ Once running, these services are available:
 |-------|-----------|
 | **Frontend** | React 19, TypeScript, Vite 7, Tailwind CSS 4, TanStack Query |
 | **Backend** | FastAPI, SQLAlchemy, Alembic, Python 3.12 |
-| **Auth** | Zitadel (OIDC/PKCE), PyJWT |
+| **Auth** | API tokens (built-in), Logto OIDC, or Zitadel OIDC — PyJWT |
 | **Database** | PostgreSQL 16, Redis 7 |
 | **Proxy** | Traefik v3 (file-based routing + Let's Encrypt) |
 | **Storage** | MinIO (S3-compatible) |
