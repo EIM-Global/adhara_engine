@@ -34,6 +34,12 @@ adhara-engine site create --workspace my-team/production --name "My App" --port 
 adhara-engine site deploy my-team/production/my-app
 ```
 
+### The Name
+
+*Adhara* (अधार) means **foundation** in Sanskrit — the base that everything else is built on. It's also the name of one of the brightest stars in the night sky (Epsilon Canis Majoris), a guiding light visible from both hemispheres.
+
+That's the idea behind Adhara Engine: a solid foundation for deploying your projects, and a bright point of reference to guide you from code to a running site — whether that's on your laptop, your local network, or a cloud server halfway around the world.
+
 ## Where It Runs
 
 Adhara Engine is designed to run **anywhere Docker runs** — online or offline, cloud or closet.
@@ -253,11 +259,14 @@ ssh root@YOUR_DROPLET_IP
 Now create a non-root user. This is important — you should never run applications as root:
 
 ```bash
-# Create the user (you'll be prompted to set a password)
+# Create the user (you'll be prompted to set a password and some optional info)
 adduser deploy
 
-# Give them sudo access
+# Give them sudo access (required for installing packages, running scripts)
 usermod -aG sudo deploy
+
+# Give them Docker access (so they can run containers without sudo)
+usermod -aG docker deploy
 ```
 
 Copy your SSH key from root to the new user so you can SSH in directly as `deploy`:
@@ -279,6 +288,10 @@ exit
 
 # SSH back in as deploy — this should work without a password
 ssh deploy@YOUR_DROPLET_IP
+
+# Verify sudo works (enter the password you set above)
+sudo whoami
+# Should print: root
 ```
 
 > **If you get "Permission denied":** Your SSH key wasn't copied correctly. SSH back in as root and re-run the `cp`/`chown`/`chmod` commands above.
@@ -289,12 +302,10 @@ Follow DigitalOcean's official Docker installation guide for your Ubuntu version
 
 **[How to Install and Use Docker on Ubuntu (DigitalOcean)](https://www.digitalocean.com/community/tutorial-collections/how-to-install-and-use-docker)**
 
-After installing Docker, add your deploy user to the `docker` group so it can run containers without `sudo`:
+After Docker is installed, verify the `deploy` user can run containers (we added them to the `docker` group in step 3):
 
 ```bash
-sudo usermod -aG docker deploy
-
-# IMPORTANT: Log out and back in for the group change to take effect
+# IMPORTANT: Log out and back in so the docker group takes effect
 exit
 ssh deploy@YOUR_DROPLET_IP
 
@@ -302,7 +313,7 @@ ssh deploy@YOUR_DROPLET_IP
 docker run --rm hello-world
 ```
 
-You should see "Hello from Docker!" — if you get a permission error, make sure you logged out and back in.
+You should see "Hello from Docker!" — if you get a permission error, make sure you logged out and back in after installing Docker.
 
 #### 5. Install Make and clone the repo
 
