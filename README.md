@@ -470,6 +470,53 @@ make init && make token
 
 Open **http://engine.localhost** and log in with the token. See [Local Machine Setup](#local-machine-setup) for details or [Setup](#setup) for cloud deployment guides.
 
+## Deploy Your First Site
+
+Adhara Engine ships with an example podcast website you can deploy in under 5 minutes to see the full workflow in action.
+
+### 1. Build the example site
+
+```bash
+cd examples/podcast-site
+docker build -t engine.localhost/podcast-site:latest .
+docker push engine.localhost/podcast-site:latest
+```
+
+### 2. Create a tenant, workspace, and site
+
+```bash
+# Install the CLI (if you haven't already)
+cd ../..
+make install
+
+# Create a tenant and workspace
+adhara-engine tenant create --name "Demo" --email you@example.com --plan pro
+adhara-engine workspace create --tenant demo --name "Sites"
+
+# Create the site pointing to your image
+adhara-engine site create \
+  --workspace demo/sites \
+  --name "Podcast Site" \
+  --source docker_image \
+  --image "engine.localhost/podcast-site:latest" \
+  --port 3000
+```
+
+### 3. Deploy and open it
+
+```bash
+adhara-engine site deploy demo/sites/podcast-site
+
+# Open in your browser
+open http://podcast-site.sites.demo.localhost
+```
+
+That's the complete workflow: build an image, create a site, deploy. The site is now running in a container with automatic Traefik routing.
+
+> **Want to customize it?** Edit `examples/podcast-site/src/data.ts` to change the podcast name, episodes, and host info. Rebuild and redeploy with `docker build` + `adhara-engine site deploy`.
+
+See the [example site README](examples/podcast-site/README.md) for more details, including how to deploy to Vercel.
+
 ## Deployment Profiles
 
 Adhara Engine uses Docker Compose profiles to let you run only the services you need. The core profile is lightweight (~500MB) and uses API token auth — no SSO provider, Grafana, or MinIO required.
@@ -910,10 +957,12 @@ Once running, these services are available:
 
 | Guide | Description |
 |-------|-------------|
+| [Example: Podcast Site](examples/podcast-site/) | Complete example site — build, deploy, and customize |
 | [Local Setup](docs/LOCAL_SETUP.md) | Detailed local development guide |
 | [Deploying Sites](docs/DEPLOYING_SITES.md) | End-to-end deployment workflows |
 | [Engine Integration](docs/ENGINE_INTEGRATION_GUIDE.md) | How to Dockerize apps for the engine |
 | [GCP Deployment](docs/GCP_DEPLOYMENT.md) | Cloud deployment to Google Cloud |
+| [Architecture](docs/ARCHITECTURE.md) | System design, data model, pipeline, RBAC |
 | [Security Hardening](scripts/adhara-secure.sh) | UFW, HTTPS, port lockdown script |
 
 ## How It Works (Deep Dive)
