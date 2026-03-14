@@ -43,11 +43,14 @@ services:
       # Zitadel legacy (only when --profile zitadel is used)
       - ZITADEL_DOMAIN=${ZITADEL_DOMAIN:-}
       - ZITADEL_ISSUER=${ZITADEL_ISSUER:-}
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
       interval: 10s
