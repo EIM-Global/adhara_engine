@@ -8,7 +8,7 @@
         up up-auth up-zitadel up-full up-obs \
         down restart clean dev build \
         db-migrate db-seed db-reset \
-        cli-install status logs logs-api help \
+        install cli-install status logs logs-api help \
         sites-status sites-down sites-up sites-restart \
         token
 
@@ -222,6 +222,12 @@ token: ## Create a platform-admin API token and save to .env
 	fi
 
 # ── CLI ──────────────────────────────────────────────────────
+
+install: ## Install the CLI tool globally (adds adhara-engine to PATH)
+	uv tool install --from ./cli --force adhara-engine-cli
+	@echo ""
+	@echo "CLI installed globally. Run: adhara-engine --help"
+	@echo "If not found, ensure ~/.local/bin is on your PATH."
 
 cli-install: ## Install the CLI tool locally (in venv)
 	cd cli && uv venv .venv && . .venv/bin/activate && uv pip install -e .
