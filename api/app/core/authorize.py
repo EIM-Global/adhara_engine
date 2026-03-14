@@ -33,6 +33,22 @@ from app.models.site import Site
 from app.models.workspace import Workspace
 
 
+def _flatten_token_scopes(token_scopes: list) -> set[Permission] | None:
+    """Extract Permission set from API token scopes (list of dicts or strings).
+    Returns None if wildcard '*' is present (meaning all permissions granted).
+    """
+    flat_perms: list[str] = []
+    for scope in token_scopes:
+        if isinstance(scope, dict):
+            flat_perms.extend(scope.get("permissions", []))
+        elif isinstance(scope, str):
+            flat_perms.append(scope)
+    # Wildcard means all permissions — don't restrict
+    if "*" in flat_perms:
+        return None
+    return {Permission(s) for s in flat_perms if s in Permission._value2member_map_}
+
+
 async def authorize(
     user: dict,
     permission: Permission,
@@ -69,8 +85,9 @@ async def authorize(
         if user.get("token_type") == "api_token":
             token_scopes = user.get("scopes") or []
             if token_scopes:
-                scope_perms = {Permission(s) for s in token_scopes if s in Permission._value2member_map_}
-                role_perms = role_perms & scope_perms
+                scope_perms = _flatten_token_scopes(token_scopes)
+                if scope_perms is not None:  # None = wildcard, no restriction
+                    role_perms = role_perms & scope_perms
         if permission in role_perms:
             return membership  # AUTHORIZED
 
@@ -104,8 +121,9 @@ async def authorize_any(
         if user.get("token_type") == "api_token":
             token_scopes = user.get("scopes") or []
             if token_scopes:
-                scope_perms = {Permission(s) for s in token_scopes if s in Permission._value2member_map_}
-                role_perms = role_perms & scope_perms
+                scope_perms = _flatten_token_scopes(token_scopes)
+                if scope_perms is not None:  # None = wildcard, no restriction
+                    role_perms = role_perms & scope_perms
         if any(p in role_perms for p in permissions):
             return membership
 
