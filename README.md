@@ -256,63 +256,136 @@ That's it. The engine is running at **http://engine.localhost**.
 | Large | Basic, Premium | 8 | 16 GB | ~$96/mo | 50-100+ |
 
 4. Choose a datacenter region close to your users
-5. Under **Authentication**, add your SSH key
+5. Under **Authentication**, select **SSH Key** and add your public key (see step 2 if you don't have one yet)
 6. Click **Create Droplet** and note the IP address
 
-#### 2. Create a deploy user (don't run as root)
+#### 2. Set up your SSH key (on YOUR computer)
 
-SSH in as root, then create a non-root user with sudo and Docker access:
+> **Already have an SSH key?** Run `cat ~/.ssh/id_ed25519.pub` (or `id_rsa.pub`). If you see a key starting with `ssh-ed25519` or `ssh-rsa`, skip to step 3.
+
+If you don't have an SSH key yet, create one **on your local machine** (not the server):
+
+```bash
+# Run this on YOUR computer (Mac/Linux terminal, or Git Bash on Windows)
+ssh-keygen -t ed25519 -C "your-email@example.com"
+```
+
+- Press **Enter** to accept the default file location (`~/.ssh/id_ed25519`)
+- Enter a passphrase (optional but recommended) or press **Enter** twice for no passphrase
+- Two files are created:
+  - `~/.ssh/id_ed25519` — your **private** key (never share this)
+  - `~/.ssh/id_ed25519.pub` — your **public** key (this goes on servers)
+
+Copy your public key to your clipboard:
+
+```bash
+# macOS
+cat ~/.ssh/id_ed25519.pub | pbcopy
+
+# Linux
+cat ~/.ssh/id_ed25519.pub | xclip -selection clipboard
+
+# Or just print it and copy manually
+cat ~/.ssh/id_ed25519.pub
+```
+
+Go back to DigitalOcean → **Settings → Security → SSH Keys → Add SSH Key**, paste the public key, and give it a name. Now create your Droplet with this key selected.
+
+#### 3. Create a deploy user (don't run as root)
+
+SSH into the droplet as root:
 
 ```bash
 ssh root@YOUR_DROPLET_IP
+```
 
-# Create your user
+> **First time connecting?** You'll see "The authenticity of host can't be established." Type `yes` and press Enter.
+
+Now create a non-root user. This is important — you should never run applications as root:
+
+```bash
+# Create the user (you'll be prompted to set a password)
 adduser deploy
+
+# Give them sudo access
 usermod -aG sudo deploy
+```
 
-# Let them use Docker without sudo (installed next step)
-usermod -aG docker deploy
+Copy your SSH key from root to the new user so you can SSH in directly as `deploy`:
 
-# Set up SSH key for the new user
+```bash
+# Copy root's authorized keys to the deploy user
 mkdir -p /home/deploy/.ssh
 cp ~/.ssh/authorized_keys /home/deploy/.ssh/
 chown -R deploy:deploy /home/deploy/.ssh
 chmod 700 /home/deploy/.ssh
 chmod 600 /home/deploy/.ssh/authorized_keys
-
-# Log out of root — from now on, always SSH as deploy
-exit
 ```
 
-#### 3. Install Docker
-
-SSH in as your new user:
+Verify it works before logging out of root:
 
 ```bash
-ssh deploy@YOUR_DROPLET_IP
+# Log out of root
+exit
 
-# Install Docker (official method)
-curl -fsSL https://get.docker.com | sh
+# SSH back in as deploy — this should work without a password
+ssh deploy@YOUR_DROPLET_IP
+```
+
+> **If you get "Permission denied":** Your SSH key wasn't copied correctly. SSH back in as root and re-run the `cp`/`chown`/`chmod` commands above.
+
+#### 4. Install Docker
+
+Follow DigitalOcean's official Docker installation guide for your Ubuntu version:
+
+**[How to Install and Use Docker on Ubuntu (DigitalOcean)](https://www.digitalocean.com/community/tutorial-collections/how-to-install-and-use-docker)**
+
+After installing Docker, add your deploy user to the `docker` group so it can run containers without `sudo`:
+
+```bash
+sudo usermod -aG docker deploy
+
+# IMPORTANT: Log out and back in for the group change to take effect
+exit
+ssh deploy@YOUR_DROPLET_IP
 
 # Verify Docker works without sudo
 docker run --rm hello-world
 ```
 
-> If `docker run` gives a permission error, log out and back in so the `docker` group takes effect.
+You should see "Hello from Docker!" — if you get a permission error, make sure you logged out and back in.
 
-#### 4. Install Make and clone the repo
+#### 5. Install Make and clone the repo
 
 ```bash
 sudo apt update && sudo apt install -y make git
+```
 
+Now set up an SSH key **on the server** for GitHub access:
+
+```bash
+# Generate a key on the server
+ssh-keygen -t ed25519 -C "deploy@YOUR_DROPLET_IP"
+# Press Enter for all prompts (no passphrase needed for deploy keys)
+
+# Print the public key
+cat ~/.ssh/id_ed25519.pub
+```
+
+Copy that public key and add it to GitHub:
+1. Go to **github.com → EIM-Global/adhara_engine → Settings → Deploy keys → Add deploy key**
+2. Paste the key, give it a title (e.g., "Droplet deploy key"), check **Allow read access**
+3. Click **Add key**
+
+Now clone and enter the repo:
+
+```bash
 mkdir -p ~/projects && cd ~/projects
 git clone git@github.com:EIM-Global/adhara_engine.git
 cd adhara_engine
 ```
 
-> **Need SSH access to GitHub?** Generate a key with `ssh-keygen -t ed25519`, then add `~/.ssh/id_ed25519.pub` as a deploy key in the GitHub repo settings (read-only is fine).
-
-#### 5. Start the engine
+#### 6. Start the engine
 
 ```bash
 # Creates .env with auto-generated secrets, builds images, runs migrations
@@ -322,19 +395,23 @@ make init
 make token
 ```
 
-#### 6. Access the dashboard
+The token will be printed to the terminal — **copy it now**, you'll need it to log in.
 
-Open `http://YOUR_DROPLET_IP` in your browser. Log in with the API token from step 5.
+#### 7. Access the dashboard
 
-#### 7. (Optional) Set up SSO
+Open `http://YOUR_DROPLET_IP` in your browser. Paste the API token from step 6 to log in.
+
+You now have a running Adhara Engine. The following steps are optional:
+
+#### 8. (Optional) Set up SSO
 
 See [Authentication Modes](#authentication-modes) below for Logto or Zitadel SSO setup.
 
-#### 8. (Optional) Enable HTTPS
+#### 9. (Optional) Enable HTTPS
 
 See [Enabling HTTPS](#enabling-https) below to set up a domain with auto-SSL.
 
-#### 9. (Optional) Harden security
+#### 10. (Optional) Harden security
 
 ```bash
 sudo bash scripts/adhara-secure.sh
