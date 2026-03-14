@@ -383,7 +383,19 @@ This configures UFW firewall rules and locks down internal ports.
 
 ### Google Cloud Platform Setup
 
-GCP requires additional firewall rules and uses `gcloud` for VM creation. For the full GCP-specific guide (VM sizing, firewall rules, IAP tunnels, service accounts), see **[docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md)**.
+#### Automated (recommended)
+
+The fastest way to deploy to GCP — an interactive wizard that creates the VM, installs Docker, configures auth, and starts the engine:
+
+```bash
+bash scripts/deploy_gcp.sh
+```
+
+The wizard will walk you through VM size, zone, authentication mode (token/Logto/Zitadel), optional services, and domain setup. Everything is scriptable via `gcloud`.
+
+#### Manual
+
+If you prefer to set things up step by step, or need to customize beyond what the wizard offers, follow the manual instructions below. For the full GCP-specific guide (VM sizing, IAP tunnels, service accounts), see **[docs/GCP_DEPLOYMENT.md](docs/GCP_DEPLOYMENT.md)**.
 
 #### 1. Create the VM
 
