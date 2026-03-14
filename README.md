@@ -1,7 +1,7 @@
 # Adhara Engine
 
-> Copyright (c) 2026 EIM Global Solutions, LLC. All rights reserved.
-> Licensed under a proprietary license. See [LICENSE](LICENSE) for details.
+> Copyright (c) 2024-2026 EIM Global Solutions, LLC.
+> Licensed under the [Business Source License 1.1](LICENSE) — free for companies under $1M revenue.
 
 A self-hosted, multi-tenant deployment platform for web applications. Deploy sites through a web dashboard, CLI, or API — backed by Docker containers with automatic routing, SSL, and authentication.
 
@@ -1109,8 +1109,33 @@ DOCKER_HOST_SOCKET=/run/user/1000/podman/podman.sock
 
 ## License
 
-Copyright (c) 2026 EIM Global Solutions, LLC. All rights reserved.
+Adhara Engine is source-available under the [Business Source License 1.1](LICENSE) (BSL 1.1).
 
-This is proprietary software. Unauthorized copying, distribution, modification, or use of this software, via any medium, is strictly prohibited without prior written consent from EIM Global Solutions, LLC.
+### What you can do
 
-See [LICENSE](LICENSE) for the full license text.
+| Use Case | Allowed? |
+|----------|----------|
+| Personal, non-commercial use | Yes |
+| Evaluation, development, and testing | Yes |
+| Academic or educational use | Yes |
+| Production use by companies under **$1M annual revenue** | Yes |
+| Production use by non-profit organizations | Yes |
+| Production use by companies **over $1M annual revenue** | Requires a commercial license |
+| Building a competing hosted deployment platform | Requires a commercial license |
+
+### How it works
+
+- The **source code is fully open** — you can read, modify, fork, and contribute
+- Companies under $1M in annual revenue can use it in production **for free**, including to host client sites and build your business
+- Once your company exceeds $1M in annual revenue, contact us for a commercial license
+- On **March 13, 2030**, the license automatically converts to **Apache 2.0** (fully open source, no restrictions)
+
+### What counts as "competing"
+
+You need a commercial license if you offer Adhara Engine (or a modified version) as a **managed hosting platform** that competes directly with Adhara Engine itself. Using it to host your own sites, your clients' sites, or your company's internal tools is **not** competing — that's exactly what it's built for.
+
+### Commercial licensing
+
+If your company exceeds $1M in revenue or you want to build a competing service, contact **[EIM Global Solutions, LLC](mailto:hello@eimglobal.com)** for commercial licensing.
+
+Copyright (c) 2024-2026 EIM Global Solutions, LLC and Patrick Farrell. See [LICENSE](LICENSE) for the full legal text.
