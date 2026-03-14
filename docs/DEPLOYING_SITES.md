@@ -88,12 +88,14 @@ docker build -t my-app:latest .
 
 ### Step 2 — Tag and push to the local registry
 
-Adhara Engine runs a Docker registry on `localhost:5000`:
+Adhara Engine includes a Docker registry routed through Traefik on port 80. Use whatever hostname you access the engine on (e.g., `engine.localhost`, `localhost`, or your server's IP):
 
 ```bash
-docker tag my-app:latest localhost:5000/my-tenant/my-app:latest
-docker push localhost:5000/my-tenant/my-app:latest
+docker tag my-app:latest engine.localhost/my-tenant/my-app:latest
+docker push engine.localhost/my-tenant/my-app:latest
 ```
+
+> **Tip:** The registry is accessible at the same hostname as the engine dashboard — no separate port needed.
 
 ### Step 3 — Create the site
 
@@ -102,7 +104,7 @@ adhara-engine site create \
   --workspace my-tenant/production \
   --name "My App" \
   --source docker_image \
-  --image "localhost:5000/my-tenant/my-app:latest" \
+  --image "engine.localhost/my-tenant/my-app:latest" \
   --port 3000
 ```
 
@@ -246,15 +248,15 @@ docker build -t jungle-habitas:latest .
 docker run -p 3000:3000 -e SITE_URL=http://localhost:3000 jungle-habitas:latest
 
 # Push to Adhara registry
-docker tag jungle-habitas:latest localhost:5000/eim/jungle-habitas:latest
-docker push localhost:5000/eim/jungle-habitas:latest
+docker tag jungle-habitas:latest engine.localhost/eim/jungle-habitas:latest
+docker push engine.localhost/eim/jungle-habitas:latest
 
 # Create + deploy
 adhara-engine site create \
   --workspace eim/production \
   --name "Jungle Habitas" \
   --source docker_image \
-  --image "localhost:5000/eim/jungle-habitas:latest" \
+  --image "engine.localhost/eim/jungle-habitas:latest" \
   --port 3000
 
 adhara-engine site deploy eim/production/jungle-habitas
@@ -303,9 +305,9 @@ open http://localhost:4001
 
 ### "Image not found" on deploy
 
-- Verify the image is in the local registry: `curl http://localhost:5000/v2/_catalog`
-- Check the tag: `curl http://localhost:5000/v2/my-tenant/my-app/tags/list`
-- Ensure you pushed to `localhost:5000/...`, not Docker Hub
+- Verify the image is in the local registry: `curl http://engine.localhost/v2/_catalog`
+- Check the tag: `curl http://engine.localhost/v2/my-tenant/my-app/tags/list`
+- Ensure you pushed to `engine.localhost/...`, not Docker Hub
 
 ### Port conflict
 
