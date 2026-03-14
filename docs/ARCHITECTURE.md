@@ -4,7 +4,7 @@
 > Proprietary and confidential.
 
 > Authoritative design document for the Adhara Engine deployment platform.
-> Last updated: 2026-03-01
+> Last updated: 2026-03-14
 
 ## Table of Contents
 
@@ -13,14 +13,15 @@
 3. [Pipeline Engine](#pipeline-engine)
 4. [Build Drivers](#build-drivers)
 5. [Git Provider Layer](#git-provider-layer)
-6. [RBAC (Role-Based Access Control)](#rbac)
-7. [Health Monitoring & Auto-Healing](#health-monitoring--auto-healing)
-8. [Linked Services](#linked-services)
-9. [Blue-Green Deployments](#blue-green-deployments)
-10. [Notifications & Real-Time Streaming](#notifications--real-time-streaming)
-11. [API Token System](#api-token-system)
-12. [API Endpoint Reference](#api-endpoint-reference)
-13. [Implementation Phases](#implementation-phases)
+6. [Authentication](#authentication)
+7. [RBAC (Role-Based Access Control)](#rbac)
+8. [Health Monitoring & Auto-Healing](#health-monitoring--auto-healing)
+9. [Linked Services](#linked-services)
+10. [Blue-Green Deployments](#blue-green-deployments)
+11. [Notifications & Real-Time Streaming](#notifications--real-time-streaming)
+12. [API Token System](#api-token-system)
+13. [API Endpoint Reference](#api-endpoint-reference)
+14. [Implementation Phases](#implementation-phases)
 
 ---
 
@@ -85,7 +86,7 @@ Adhara Engine is a self-hosted, multi-tenant deployment platform for web applica
 |-------|-----------|
 | **Frontend** | React 19, TypeScript, Vite 7, Tailwind CSS 4, TanStack Query |
 | **Backend** | FastAPI, SQLAlchemy, Alembic, Python 3.12 |
-| **Auth** | Zitadel (OIDC/PKCE) for identity, DB-backed RBAC for authorization |
+| **Auth** | Pluggable: API tokens (built-in), Logto OIDC (lightweight SSO), or Zitadel OIDC (enterprise SSO) — DB-backed RBAC for authorization |
 | **Database** | PostgreSQL 16, Redis 7 |
 | **Background Jobs** | ARQ (async Redis queue) |
 | **Proxy** | Traefik v3 (auto-discovery via Docker labels) |
@@ -190,7 +191,7 @@ Return 202 Accepted + pipeline_run_id
 │  CLONE   → git clone --depth=1, checkout SHA   │
 │  SCAN    → Semgrep static analysis (optional)  │
 │  BUILD   → BuildDriver.build() (pluggable)     │
-│  PUSH    → Push to registry (localhost:5000)    │
+│  PUSH    → Push to registry (via Traefik /v2)   │
 │  DEPLOY  → Blue-green deploy via DeployTarget   │
 └────────────────────────────────────────────────┘
     │
@@ -439,11 +440,93 @@ class PushEvent:
 
 ---
 
+## Authentication
+
+Adhara Engine separates **identity** (who is this person?) from **authorization** (what can they access?). Identity is handled by one of three pluggable auth modes. Authorization is always handled by Adhara Engine's own DB-backed RBAC system.
+
+### Auth Modes
+
+| Mode | Profile | Footprint | Best For |
+|------|---------|-----------|----------|
+| **API Tokens** | (none — core) | 0 MB extra | Small setups, CI/CD, development, headless automation |
+| **Logto SSO** | `auth` | +150 MB | Teams wanting lightweight SSO with a polished admin UI |
+| **Zitadel SSO** | `zitadel` | +800 MB | Enterprise multi-tenancy, advanced OIDC policies |
+
+All three modes can coexist — API tokens are always available regardless of which SSO provider (if any) is running.
+
+### Mode 1: API Tokens (Built-in, No SSO)
+
+The simplest auth mode. No external identity provider needed.
+
+```
+make init       # start core services (no SSO profile)
+make token      # generate a platform-admin API token (ae_live_...)
+```
+
+- Tokens are generated server-side and stored as SHA-256 hashes
+- Scoped to specific resources and permissions (see [API Token System](#api-token-system))
+- Users enter the token on the login page — stored in browser localStorage
+- Ideal for single-admin setups, development, and CI/CD pipelines
+
+### Mode 2: Logto SSO (Lightweight OIDC)
+
+A full OIDC provider with a modern admin console, social login support, and low resource usage.
+
+```
+make init-auth   # start core + Logto (~650 MB total)
+```
+
+- **Admin Console:** `http://localhost:3002` — create applications, manage users
+- After creating an application in Logto, copy the Client ID to `VITE_OIDC_CLIENT_ID` in `ui/.env`
+- Supports social login (Google, GitHub, etc.), passwordless, and email/password
+- OIDC endpoints served on port 3001 internally, validated via JWKS
+
+### Mode 3: Zitadel SSO (Enterprise OIDC)
+
+A full-featured identity platform with multi-tenancy, advanced policies, and audit logging.
+
+```
+make init-zitadel                   # start core + Zitadel (~1.3 GB total)
+bash scripts/setup-zitadel.sh      # auto-configure OIDC application
+```
+
+- **Console:** `http://localhost/ui/console/` — routed through Traefik on port 80
+- Supports organizations, machine users, custom roles, and compliance features
+- First boot takes 3-5 minutes to bootstrap
+- OIDC endpoints validated via JWKS with Host header forwarding
+
+### How Auth Detection Works
+
+The auth middleware inspects the `Authorization: Bearer <token>` header and routes automatically:
+
+```
+Token arrives
+    │
+    ├─ Starts with "ae_"  → API token validation (DB hash lookup)
+    │
+    ├─ Contains 2 dots (JWT) → OIDC JWT validation (JWKS signature check)
+    │
+    └─ Anything else → OIDC userinfo endpoint (opaque token fallback)
+```
+
+This means API tokens and OIDC tokens work simultaneously — no configuration needed to switch between them.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `api/app/core/auth.py` | Auth middleware — token detection, JWT + API token validation |
+| `api/app/core/config.py` | OIDC settings (issuer, JWKS path, client ID) |
+| `api/app/models/api_token.py` | API token model (hash, scopes, expiry) |
+| `scripts/create_token.py` | CLI token generation script |
+
+---
+
 ## RBAC
 
 ### Design Decision
 
-**Zitadel handles identity** (who is this person?). **Adhara Engine handles authorization** (what can they access?).
+**The OIDC provider handles identity** (who is this person?). **Adhara Engine handles authorization** (what can they access?).
 
 Memberships are stored in our database (not JWT claims) so revocation is **instant** — delete the row, next API call is denied.
 
@@ -634,7 +717,7 @@ Events:
 ae_live_<32 random chars>
 ```
 
-- `ae_` prefix distinguishes from Zitadel JWTs
+- `ae_` prefix distinguishes from OIDC JWTs
 - SHA-256 hash stored in database (never plaintext after creation)
 - `token_prefix` stores first 12 chars for identification in lists
 
