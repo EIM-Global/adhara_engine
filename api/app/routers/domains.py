@@ -23,8 +23,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_auth
+from app.core.authorize import authorize
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.permissions import Permission
 from app.models.site import Site
 from app.models.workspace import Workspace
 from app.models.tenant import Tenant
@@ -147,12 +149,13 @@ def _check_domain_verified(domain: str) -> bool:
 
 
 @router.get("/api/v1/sites/{site_id}/domains", response_model=list[DomainResponse])
-def list_domains(
+async def list_domains(
     site_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
     """List all domains for a site — platform subdomain + custom domains."""
+    await authorize(user, Permission.SITE_VIEW, "site", site_id, db)
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
@@ -184,13 +187,14 @@ def list_domains(
 
 
 @router.post("/api/v1/sites/{site_id}/domains", response_model=DomainResponse, status_code=201)
-def add_domain(
+async def add_domain(
     site_id: uuid.UUID,
     data: DomainAdd,
     db: Session = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
     """Add a custom domain to a site. Returns DNS records to configure."""
+    await authorize(user, Permission.SITE_UPDATE, "site", site_id, db)
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
@@ -215,13 +219,14 @@ def add_domain(
 
 
 @router.delete("/api/v1/sites/{site_id}/domains/{domain}", status_code=200)
-def remove_domain(
+async def remove_domain(
     site_id: uuid.UUID,
     domain: str,
     db: Session = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
     """Remove a custom domain from a site."""
+    await authorize(user, Permission.SITE_UPDATE, "site", site_id, db)
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
@@ -238,13 +243,14 @@ def remove_domain(
 
 
 @router.post("/api/v1/sites/{site_id}/domains/{domain}/verify", response_model=DomainResponse)
-def verify_domain(
+async def verify_domain(
     site_id: uuid.UUID,
     domain: str,
     db: Session = Depends(get_db),
     user: dict = Depends(require_auth),
 ):
     """Check DNS propagation for a custom domain."""
+    await authorize(user, Permission.SITE_VIEW, "site", site_id, db)
     site = db.query(Site).filter(Site.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")

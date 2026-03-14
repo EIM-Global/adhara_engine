@@ -218,27 +218,10 @@ async def _provision_minio_bucket(
         if not client.bucket_exists(bucket_name):
             client.make_bucket(bucket_name)
 
-        # Set a bucket-scoped policy restricting access to this bucket only
-        policy = {
-            "Version": "2012-10-17",
-            "Statement": [
-                {
-                    "Effect": "Allow",
-                    "Action": [
-                        "s3:GetObject",
-                        "s3:PutObject",
-                        "s3:DeleteObject",
-                        "s3:ListBucket",
-                        "s3:GetBucketLocation",
-                    ],
-                    "Resource": [
-                        f"arn:aws:s3:::{bucket_name}",
-                        f"arn:aws:s3:::{bucket_name}/*",
-                    ],
-                }
-            ],
-        }
-        client.set_bucket_policy(bucket_name, json.dumps(policy))
+        # Bucket is kept private by default (no public policy).
+        # Access is mediated through the engine API, not direct S3 calls.
+        # When per-bucket service accounts are available (MinIO admin SDK),
+        # a scoped policy with an explicit Principal will be added here.
 
         # Do NOT inject root MinIO credentials into site containers.
         # Sites access storage through the engine API or request

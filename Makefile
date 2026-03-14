@@ -116,14 +116,13 @@ init-full: .env ## First-time setup: ALL services (~2GB) — Logto SSO, logging,
 .env:
 	cp .env.example .env
 	@echo "Generating secure random secrets..."
-	@SECRET=$$(openssl rand -base64 32) && sed -i.bak "s|ENGINE_SECRET_KEY=change-me-to-a-random-string|ENGINE_SECRET_KEY=$$SECRET|" .env
-	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|POSTGRES_PASSWORD=engine|POSTGRES_PASSWORD=$$SECRET|" .env
-	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|MINIO_ACCESS_KEY=engine|MINIO_ACCESS_KEY=$$(openssl rand -hex 12)|" .env
-	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|MINIO_SECRET_KEY=engine-secret|MINIO_SECRET_KEY=$$SECRET|" .env
-	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|GRAFANA_PASSWORD=admin|GRAFANA_PASSWORD=$$SECRET|" .env
-	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|ZITADEL_DB_PASSWORD=zitadel|ZITADEL_DB_PASSWORD=$$SECRET|" .env
-	@python3 -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(32)))" | xargs -I{} sed -i.bak "s|ZITADEL_MASTERKEY=MasterkeyNeedsToHave32Characters|ZITADEL_MASTERKEY={}|" .env
-	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|REGISTRY_PASSWORD=change-me-registry-password|REGISTRY_PASSWORD=$$SECRET|" .env
+	@SECRET=$$(openssl rand -base64 32) && sed -i.bak "s|ENGINE_SECRET_KEY=.*|ENGINE_SECRET_KEY=$$SECRET|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$SECRET|" .env
+	@sed -i.bak "s|MINIO_ACCESS_KEY=.*|MINIO_ACCESS_KEY=$$(openssl rand -hex 12)|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|MINIO_SECRET_KEY=.*|MINIO_SECRET_KEY=$$SECRET|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|GRAFANA_PASSWORD=.*|GRAFANA_PASSWORD=$$SECRET|" .env
+	@SECRET=$$(openssl rand -base64 24) && sed -i.bak "s|ZITADEL_DB_PASSWORD=.*|ZITADEL_DB_PASSWORD=$$SECRET|" .env
+	@python3 -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(32)))" | xargs -I{} sed -i.bak "s|ZITADEL_MASTERKEY=.*|ZITADEL_MASTERKEY={}|" .env
 	@rm -f .env.bak
 	@echo "Created .env with auto-generated secrets."
 

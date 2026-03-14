@@ -75,20 +75,48 @@ def validate_secrets():
     Called during application startup. Raises SystemExit if critical secrets
     are missing or insecure.
     """
-    errors = []
+    import os
 
-    checks = [
+    errors = []
+    warnings = []
+
+    # Required — startup fails if missing or weak
+    required_checks = [
         ("ENGINE_SECRET_KEY", settings.engine_secret_key),
         ("DATABASE_URL", settings.database_url),
     ]
 
-    for name, value in checks:
+    for name, value in required_checks:
         if not value:
             errors.append(f"  {name} is not set")
         elif value in _KNOWN_WEAK_SECRETS:
             errors.append(f"  {name} is using a known weak default value")
 
+    # Advisory — warn but don't block startup (may not be configured yet)
+    advisory_checks = [
+        ("POSTGRES_PASSWORD", os.environ.get("POSTGRES_PASSWORD", "")),
+        ("MINIO_SECRET_KEY", settings.minio_secret_key),
+        ("GRAFANA_PASSWORD", os.environ.get("GRAFANA_PASSWORD", "")),
+        ("ZITADEL_MASTERKEY", os.environ.get("ZITADEL_MASTERKEY", "")),
+        ("ZITADEL_DB_PASSWORD", os.environ.get("ZITADEL_DB_PASSWORD", "")),
+    ]
+
+    for name, value in advisory_checks:
+        if value and value in _KNOWN_WEAK_SECRETS:
+            warnings.append(f"  {name} is using a known weak default value")
+
     if errors:
         msg = "SECURITY: Cannot start with insecure configuration:\n" + "\n".join(errors)
+        if warnings:
+            msg += "\n\nAdditional warnings:\n" + "\n".join(warnings)
         msg += "\n\nSet proper secrets in .env or environment variables."
         raise SystemExit(msg)
+
+    if warnings:
+        import logging
+        logger = logging.getLogger("security")
+        logger.warning(
+            "SECURITY WARNING: Weak default credentials detected:\n"
+            + "\n".join(warnings)
+            + "\n\nGenerate strong secrets before deploying to production."
+        )
