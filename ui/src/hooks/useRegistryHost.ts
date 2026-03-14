@@ -4,8 +4,8 @@ import { api } from '../api/client';
 /**
  * Returns the registry host for push/pull commands.
  * Fetches from platform config API (which resolves ADHARA_DOMAIN → registry.DOMAIN
- * for HTTPS mode, or falls back to IP:5000 for HTTP mode).
- * Returns a fallback while loading so UI never shows empty strings.
+ * for HTTPS mode). In local/HTTP mode, derives from the browser's current
+ * hostname — the registry is routed through Traefik at /v2/ on port 80.
  */
 export function useRegistryHost(): string {
   const { data } = useQuery({
@@ -16,6 +16,6 @@ export function useRegistryHost(): string {
 
   if (data?.registry_host) return data.registry_host;
 
-  // Fallback while loading: derive from current page location
-  return `${window.location.hostname}:5000`;
+  // Derive from current page location — registry is routed through Traefik
+  return window.location.hostname;
 }

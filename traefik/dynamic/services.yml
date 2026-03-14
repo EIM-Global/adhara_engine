@@ -36,6 +36,15 @@ http:
       middlewares: [security-headers]
       priority: 100
 
+    # ── Docker Registry ──────────────────────────────────────
+    # Routes /v2/ to the registry service so `docker push hostname/image`
+    # works through port 80 without needing :5000 directly.
+    registry:
+      rule: "PathPrefix(`/v2`)"
+      entryPoints: [web]
+      service: registry
+      priority: 150
+
     # ── Zitadel (profile: zitadel) — routed through port 80 ──
     # Only active when Zitadel containers are running.
     # Note: /auth/callback must NOT match — it's the UI's OIDC redirect.

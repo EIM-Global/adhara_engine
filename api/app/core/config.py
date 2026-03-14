@@ -45,11 +45,11 @@ class Settings(BaseSettings):
 
     # Public IP of the engine server (shown in A record DNS instructions)
     # Set this to the actual public IP once deployed
-    engine_public_ip: str = "76.76.21.21"
+    engine_public_ip: str = ""
 
     # Docker Registry host for push/pull commands shown in UI
     # When HTTPS is enabled (ADHARA_DOMAIN set), set to registry.DOMAIN
-    # When running locally, defaults to hostname:5000
+    # When running locally, the UI derives it from the browser hostname
     registry_host: str = ""
 
     model_config = {"env_prefix": "", "case_sensitive": False}

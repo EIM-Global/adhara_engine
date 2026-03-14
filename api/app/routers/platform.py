@@ -224,14 +224,15 @@ def _resolve_registry_host() -> str:
     """Return the registry host for push/pull commands.
 
     If explicitly configured, use that. Otherwise derive from ADHARA_DOMAIN
-    (HTTPS mode) or fall back to IP:5000 (HTTP mode).
+    (HTTPS mode) or return empty string so the UI derives it from the
+    browser's current hostname.
     """
     if settings.registry_host:
         return settings.registry_host
     adhara_domain = os.environ.get("ADHARA_DOMAIN", "")
     if adhara_domain:
         return f"registry.{adhara_domain}"
-    return f"{settings.engine_public_ip}:5000"
+    return ""
 
 
 @router.get("/api/v1/platform/config", response_model=PlatformConfig)
