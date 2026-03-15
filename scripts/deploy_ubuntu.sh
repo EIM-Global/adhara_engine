@@ -125,19 +125,67 @@ DEPLOY_USER="$(whoami)"
 ENGINE_DIR=""
 
 if [ "$RUNNING_AS_ROOT" = true ]; then
-  step 1 "Create Deploy User"
+  step 1 "Deploy User"
 
-  info "A non-root user is needed to run the engine. Enter a username below."
-  info "Press Enter to use the default 'deploy', or type a custom name."
-  echo ""
-  DEPLOY_USER=$(ask "Enter deploy username" "deploy")
+  # Find existing non-root users with login shells
+  EXISTING_USERS=()
+  while IFS=: read -r username _ uid _ _ home shell; do
+    if [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ] && [[ "$shell" == */bash || "$shell" == */zsh || "$shell" == */sh ]]; then
+      EXISTING_USERS+=("$username")
+    fi
+  done < /etc/passwd
 
-  if id "$DEPLOY_USER" &>/dev/null; then
-    ok "User '${DEPLOY_USER}' already exists"
+  if [ ${#EXISTING_USERS[@]} -gt 0 ]; then
+    info "Found existing users on this system:"
+    echo ""
+
+    # Build choice list: existing users + create new
+    USER_OPTIONS=()
+    for u in "${EXISTING_USERS[@]}"; do
+      USER_OPTIONS+=("${u} (existing)")
+    done
+    USER_OPTIONS+=("Create a new user")
+
+    USER_CHOICE=$(ask_choice "Select a user to run Adhara Engine:" "${USER_OPTIONS[@]}")
+
+    if [[ "$USER_CHOICE" == "Create a new user" ]]; then
+      echo ""
+      DEPLOY_USER=$(ask "Enter new username" "deploy")
+      info "Creating user '${DEPLOY_USER}'..."
+      adduser --gecos "" "$DEPLOY_USER"
+      ok "User '${DEPLOY_USER}' created"
+
+      # Copy SSH keys from root to new user
+      if [ -f /root/.ssh/authorized_keys ]; then
+        mkdir -p "/home/${DEPLOY_USER}/.ssh"
+        cp /root/.ssh/authorized_keys "/home/${DEPLOY_USER}/.ssh/"
+        chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "/home/${DEPLOY_USER}/.ssh"
+        chmod 700 "/home/${DEPLOY_USER}/.ssh"
+        chmod 600 "/home/${DEPLOY_USER}/.ssh/authorized_keys"
+        ok "SSH keys copied from root"
+      fi
+    else
+      # Extract username from "username (existing)"
+      DEPLOY_USER=$(echo "$USER_CHOICE" | awk '{print $1}')
+      ok "Using existing user: ${DEPLOY_USER}"
+    fi
   else
+    # No existing users — create one
+    info "No non-root users found. Let's create one."
+    echo ""
+    DEPLOY_USER=$(ask "Enter new username" "deploy")
     info "Creating user '${DEPLOY_USER}'..."
     adduser --gecos "" "$DEPLOY_USER"
     ok "User '${DEPLOY_USER}' created"
+
+    if [ -f /root/.ssh/authorized_keys ]; then
+      mkdir -p "/home/${DEPLOY_USER}/.ssh"
+      cp /root/.ssh/authorized_keys "/home/${DEPLOY_USER}/.ssh/"
+      chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "/home/${DEPLOY_USER}/.ssh"
+      chmod 700 "/home/${DEPLOY_USER}/.ssh"
+      chmod 600 "/home/${DEPLOY_USER}/.ssh/authorized_keys"
+      ok "SSH keys copied from root"
+    fi
   fi
 
   # Ensure sudo group
@@ -146,19 +194,6 @@ if [ "$RUNNING_AS_ROOT" = true ]; then
     ok "Added to sudo group"
   else
     ok "Already in sudo group"
-  fi
-
-  # Copy SSH keys from root
-  if [ -f /root/.ssh/authorized_keys ]; then
-    mkdir -p "/home/${DEPLOY_USER}/.ssh"
-    cp /root/.ssh/authorized_keys "/home/${DEPLOY_USER}/.ssh/"
-    chown -R "${DEPLOY_USER}:${DEPLOY_USER}" "/home/${DEPLOY_USER}/.ssh"
-    chmod 700 "/home/${DEPLOY_USER}/.ssh"
-    chmod 600 "/home/${DEPLOY_USER}/.ssh/authorized_keys"
-    ok "SSH keys copied from root"
-  else
-    warn "No SSH keys found at /root/.ssh/authorized_keys"
-    warn "You'll need to set up SSH access for '${DEPLOY_USER}' manually"
   fi
 
   ENGINE_DIR="/home/${DEPLOY_USER}/projects/adhara_engine"
