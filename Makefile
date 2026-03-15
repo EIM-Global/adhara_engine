@@ -200,8 +200,15 @@ db-reset: ## Reset database (DESTRUCTIVE)
 
 token: ## Create a platform-admin API token and save to .env
 	@echo "Creating platform-admin API token..."
-	@TOKEN=$$(docker compose exec -T api python scripts/create_token.py 2>&1 | tail -1) && \
-	if echo "$$TOKEN" | grep -q "^ae_live_"; then \
+	@echo "Waiting for API to be ready..."
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		docker compose exec -T api python -c "from app.core.database import SessionLocal; SessionLocal().execute('SELECT 1')" > /dev/null 2>&1 && break; \
+		echo "  Waiting for database... ($$i/10)"; \
+		sleep 3; \
+	done
+	@OUTPUT=$$(docker compose exec -T api python scripts/create_token.py 2>/tmp/adhara_token_err) && \
+	TOKEN=$$(echo "$$OUTPUT" | grep "^ae_live_" | head -1) && \
+	if [ -n "$$TOKEN" ]; then \
 		if grep -q "^ADHARA_ENGINE_TOKEN=" .env 2>/dev/null; then \
 			sed -i.bak "s|^ADHARA_ENGINE_TOKEN=.*|ADHARA_ENGINE_TOKEN=$$TOKEN|" .env && rm -f .env.bak; \
 			echo "Updated ADHARA_ENGINE_TOKEN in .env"; \
@@ -216,9 +223,14 @@ token: ## Create a platform-admin API token and save to .env
 		echo "Use with: curl -H 'Authorization: Bearer $$TOKEN' ..."; \
 	else \
 		echo "ERROR: Failed to create token."; \
-		echo "$$TOKEN"; \
+		echo "--- stdout ---"; \
+		echo "$$OUTPUT"; \
+		echo "--- stderr ---"; \
+		cat /tmp/adhara_token_err 2>/dev/null; \
+		rm -f /tmp/adhara_token_err; \
 		exit 1; \
 	fi
+	@rm -f /tmp/adhara_token_err
 
 # ── CLI ──────────────────────────────────────────────────────
 
