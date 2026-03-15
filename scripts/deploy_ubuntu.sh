@@ -217,50 +217,9 @@ ok "Make and Git installed"
 
 step 4 "Clone Repository"
 
-REPO_URL=$(ask "Git clone URL" "git@github.com:EIM-Global/adhara_engine.git")
-
-# If SSH repo, ensure SSH key exists for deploy user
-if [[ "$REPO_URL" == git@* ]]; then
-  DEPLOY_HOME=$(eval echo "~${DEPLOY_USER}")
-  SSH_KEY="${DEPLOY_HOME}/.ssh/id_ed25519"
-
-  if [ ! -f "$SSH_KEY" ]; then
-    info "Generating SSH key for GitHub access..."
-
-    if [ "$RUNNING_AS_ROOT" = true ]; then
-      su - "$DEPLOY_USER" -c "ssh-keygen -t ed25519 -C '${DEPLOY_USER}@adhara-engine' -f '${SSH_KEY}' -N ''"
-    else
-      ssh-keygen -t ed25519 -C "${DEPLOY_USER}@adhara-engine" -f "$SSH_KEY" -N ""
-    fi
-
-    echo ""
-    echo -e "${BOLD}══════════════════════════════════════════════════════════════════${RESET}"
-    echo -e "${BOLD}  Add this deploy key to GitHub:${RESET}"
-    echo -e "${BOLD}══════════════════════════════════════════════════════════════════${RESET}"
-    echo ""
-    cat "${SSH_KEY}.pub"
-    echo ""
-    echo -e "  1. Go to ${CYAN}github.com/EIM-Global/adhara_engine/settings/keys${RESET}"
-    echo -e "  2. Click ${BOLD}Add deploy key${RESET}"
-    echo -e "  3. Paste the key above, check ${BOLD}Allow read access${RESET}"
-    echo -e "  4. Click ${BOLD}Add key${RESET}"
-    echo ""
-    echo -en "${BOLD}Press Enter after adding the deploy key to GitHub...${RESET}"
-    read -r
-  else
-    ok "SSH key already exists: ${SSH_KEY}"
-  fi
-
-  # Add GitHub to known hosts
-  KNOWN_HOSTS="${DEPLOY_HOME}/.ssh/known_hosts"
-  if ! grep -q "github.com" "$KNOWN_HOSTS" 2>/dev/null; then
-    if [ "$RUNNING_AS_ROOT" = true ]; then
-      su - "$DEPLOY_USER" -c "ssh-keyscan -t ed25519 github.com >> '${KNOWN_HOSTS}' 2>/dev/null"
-    else
-      ssh-keyscan -t ed25519 github.com >> "$KNOWN_HOSTS" 2>/dev/null
-    fi
-  fi
-fi
+REPO_URL="https://github.com/EIM-Global/adhara_engine.git"
+info "Cloning via HTTPS (no SSH key needed)"
+echo ""
 
 # Clone the repo as the deploy user
 if [ -d "$ENGINE_DIR" ]; then
@@ -271,7 +230,7 @@ if [ -d "$ENGINE_DIR" ]; then
     cd "$ENGINE_DIR" && git pull
   fi
 else
-  info "Cloning repository..."
+  info "Cloning ${REPO_URL}..."
   PARENT_DIR=$(dirname "$ENGINE_DIR")
   if [ "$RUNNING_AS_ROOT" = true ]; then
     su - "$DEPLOY_USER" -c "mkdir -p '${PARENT_DIR}' && cd '${PARENT_DIR}' && git clone '${REPO_URL}' adhara_engine"
