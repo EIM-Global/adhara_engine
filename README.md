@@ -198,6 +198,21 @@ That's it. The engine is running at **http://engine.localhost**.
 
 ### DigitalOcean Setup
 
+#### Automated (recommended)
+
+SSH into a fresh Ubuntu droplet as root and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EIM-Global/adhara_engine/main/scripts/deploy_ubuntu.sh -o deploy.sh
+bash deploy.sh
+```
+
+The wizard will create a deploy user, install Docker, clone the repo, configure auth, and start the engine. Works on any fresh Ubuntu 22.04/24.04 server (DigitalOcean, Hetzner, any VPS).
+
+#### Manual setup
+
+If you prefer step-by-step control, follow the manual instructions below.
+
 #### 1. Create the Droplet
 
 1. Go to **DigitalOcean → Create → Droplets**
