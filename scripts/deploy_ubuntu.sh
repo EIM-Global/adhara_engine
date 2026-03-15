@@ -42,11 +42,11 @@ step()  { echo -e "\n${BOLD}${CYAN}── Step $1: $2 ${RESET}\n"; }
 ask() {
   local prompt="$1" default="${2:-}"
   if [ -n "$default" ]; then
-    echo -en "${BOLD}${prompt}${RESET} ${DIM}[${default}]${RESET}: "
+    echo -en "${BOLD}${prompt}${RESET} ${DIM}[${default}]${RESET}: " >&2
     read -r answer
     echo "${answer:-$default}"
   else
-    echo -en "${BOLD}${prompt}${RESET}: "
+    echo -en "${BOLD}${prompt}${RESET}: " >&2
     read -r answer
     echo "$answer"
   fi
@@ -67,11 +67,11 @@ ask_yn() {
 ask_choice() {
   local prompt="$1"; shift
   local options=("$@")
-  echo -e "${BOLD}${prompt}${RESET}"
+  echo -e "${BOLD}${prompt}${RESET}" >&2
   for i in "${!options[@]}"; do
-    echo -e "  ${CYAN}$((i+1)))${RESET} ${options[$i]}"
+    echo -e "  ${CYAN}$((i+1)))${RESET} ${options[$i]}" >&2
   done
-  echo -en "${BOLD}Choice${RESET} ${DIM}[1]${RESET}: "
+  echo -en "${BOLD}Choice${RESET} ${DIM}[1]${RESET}: " >&2
   read -r choice
   choice="${choice:-1}"
   echo "${options[$((choice-1))]}"
@@ -127,7 +127,10 @@ ENGINE_DIR=""
 if [ "$RUNNING_AS_ROOT" = true ]; then
   step 1 "Create Deploy User"
 
-  DEPLOY_USER=$(ask "Username for the deploy user" "deploy")
+  info "A non-root user is needed to run the engine. Enter a username below."
+  info "Press Enter to use the default 'deploy', or type a custom name."
+  echo ""
+  DEPLOY_USER=$(ask "Enter deploy username" "deploy")
 
   if id "$DEPLOY_USER" &>/dev/null; then
     ok "User '${DEPLOY_USER}' already exists"

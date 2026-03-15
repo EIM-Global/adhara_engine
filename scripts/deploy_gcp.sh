@@ -43,11 +43,11 @@ ask() {
   local prompt="$1"
   local default="${2:-}"
   if [ -n "$default" ]; then
-    echo -en "${BOLD}${prompt}${RESET} ${DIM}[${default}]${RESET}: "
+    echo -en "${BOLD}${prompt}${RESET} ${DIM}[${default}]${RESET}: " >&2
     read -r answer
     echo "${answer:-$default}"
   else
-    echo -en "${BOLD}${prompt}${RESET}: "
+    echo -en "${BOLD}${prompt}${RESET}: " >&2
     read -r answer
     echo "$answer"
   fi
@@ -57,9 +57,9 @@ ask_yn() {
   local prompt="$1"
   local default="${2:-y}"
   if [ "$default" = "y" ]; then
-    echo -en "${BOLD}${prompt}${RESET} ${DIM}[Y/n]${RESET}: "
+    echo -en "${BOLD}${prompt}${RESET} ${DIM}[Y/n]${RESET}: " >&2
   else
-    echo -en "${BOLD}${prompt}${RESET} ${DIM}[y/N]${RESET}: "
+    echo -en "${BOLD}${prompt}${RESET} ${DIM}[y/N]${RESET}: " >&2
   fi
   read -r answer
   answer="${answer:-$default}"
@@ -70,11 +70,11 @@ ask_choice() {
   local prompt="$1"
   shift
   local options=("$@")
-  echo -e "${BOLD}${prompt}${RESET}"
+  echo -e "${BOLD}${prompt}${RESET}" >&2
   for i in "${!options[@]}"; do
-    echo -e "  ${CYAN}$((i+1)))${RESET} ${options[$i]}"
+    echo -e "  ${CYAN}$((i+1)))${RESET} ${options[$i]}" >&2
   done
-  echo -en "${BOLD}Choice${RESET} ${DIM}[1]${RESET}: "
+  echo -en "${BOLD}Choice${RESET} ${DIM}[1]${RESET}: " >&2
   read -r choice
   choice="${choice:-1}"
   echo "${options[$((choice-1))]}"
