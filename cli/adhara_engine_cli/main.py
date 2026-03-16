@@ -33,11 +33,13 @@ def get_client() -> EngineClient:
 def main(
     api_url: str = typer.Option("http://localhost:8000", "--api-url", "-u", envvar="ADHARA_ENGINE_URL",
                                 help="Engine API base URL"),
+    token: str = typer.Option("", "--token", "-t", envvar="ADHARA_ENGINE_TOKEN",
+                              help="API token for authentication"),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ):
     """Adhara Engine CLI."""
     global _client
-    _client = EngineClient(api_url)
+    _client = EngineClient(api_url, token=token or None)
     set_json_mode(json_output)
 
 
@@ -83,6 +85,30 @@ def tenant_list():
             tenants,
             title="Tenants",
         )
+    _handle(_run)
+
+
+@tenant_app.command("update")
+def tenant_update(
+    slug: str = typer.Argument(..., help="Tenant slug"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="New name"),
+    plan: Optional[str] = typer.Option(None, "--plan", "-p", help="New plan"),
+    email: Optional[str] = typer.Option(None, "--email", "-e", help="New owner email"),
+):
+    """Update a tenant."""
+    def _run():
+        tenant = resolve_tenant(get_client(), slug)
+        kwargs = {}
+        if name:
+            kwargs["name"] = name
+        if plan:
+            kwargs["plan"] = plan
+        if email:
+            kwargs["owner_email"] = email
+        if not kwargs:
+            print_error("Provide at least one field to update (--name, --plan, --email)")
+        result = get_client().update_tenant(tenant["id"], **kwargs)
+        print_detail(result, "Tenant updated")
     _handle(_run)
 
 
@@ -134,6 +160,30 @@ def workspace_list(
             workspaces,
             title=f"Workspaces — {tenant}",
         )
+    _handle(_run)
+
+
+@workspace_app.command("update")
+def workspace_update(
+    path: str = typer.Argument(..., help="tenant/workspace slug path"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="New name"),
+    adhara_api_url: Optional[str] = typer.Option(None, "--adhara-api-url", help="Adhara Web API URL"),
+    adhara_api_key: Optional[str] = typer.Option(None, "--adhara-api-key", help="Adhara Web API key"),
+):
+    """Update a workspace."""
+    def _run():
+        ws = resolve_workspace(get_client(), path)
+        kwargs = {}
+        if name:
+            kwargs["name"] = name
+        if adhara_api_url is not None:
+            kwargs["adhara_api_url"] = adhara_api_url
+        if adhara_api_key is not None:
+            kwargs["adhara_api_key"] = adhara_api_key
+        if not kwargs:
+            print_error("Provide at least one field to update")
+        result = get_client().update_workspace(ws["id"], **kwargs)
+        print_detail(result, "Workspace updated")
     _handle(_run)
 
 
@@ -202,6 +252,36 @@ def site_info(
     def _run():
         site = resolve_site(get_client(), path)
         print_detail(site, f"Site — {path}")
+    _handle(_run)
+
+
+@site_app.command("update")
+def site_update(
+    path: str = typer.Argument(..., help="tenant/workspace/site slug path"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="New name"),
+    source_url: Optional[str] = typer.Option(None, "--source-url", help="New source URL"),
+    branch: Optional[str] = typer.Option(None, "--branch", help="Git branch"),
+    auto_deploy: Optional[bool] = typer.Option(None, "--auto-deploy/--no-auto-deploy", help="Enable/disable auto-deploy"),
+    health_path: Optional[str] = typer.Option(None, "--health-path", help="Health check path"),
+):
+    """Update a site's configuration."""
+    def _run():
+        site = resolve_site(get_client(), path)
+        kwargs = {}
+        if name:
+            kwargs["name"] = name
+        if source_url:
+            kwargs["source_url"] = source_url
+        if branch:
+            kwargs["git_branch"] = branch
+        if auto_deploy is not None:
+            kwargs["auto_deploy"] = auto_deploy
+        if health_path:
+            kwargs["health_check_path"] = health_path
+        if not kwargs:
+            print_error("Provide at least one field to update")
+        result = get_client().update_site(site["id"], **kwargs)
+        print_detail(result, f"Site updated — {path}")
     _handle(_run)
 
 
@@ -469,6 +549,63 @@ def deploy_list(
             deployments,
             title=f"Deployments — {path}",
         )
+    _handle(_run)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PIPELINE commands
+# ═══════════════════════════════════════════════════════════════════════════════
+
+pipeline_app = typer.Typer(help="Track and manage deployment pipelines.")
+app.add_typer(pipeline_app, name="pipeline")
+
+
+@pipeline_app.command("list")
+def pipeline_list(
+    path: str = typer.Argument(..., help="tenant/workspace/site slug path"),
+):
+    """List pipeline runs for a site."""
+    def _run():
+        site = resolve_site(get_client(), path)
+        pipelines = get_client().list_pipelines(site["id"])
+        print_table(
+            [("id", "Pipeline ID"), ("status", "Status"), ("created_at", "Created")],
+            pipelines[:20],
+            title=f"Pipelines — {path}",
+        )
+    _handle(_run)
+
+
+@pipeline_app.command("info")
+def pipeline_info(
+    pipeline_id: str = typer.Argument(..., help="Pipeline run ID"),
+):
+    """Show pipeline details and stages."""
+    def _run():
+        result = get_client().get_pipeline(pipeline_id)
+        print_detail(result, f"Pipeline — {pipeline_id}")
+    _handle(_run)
+
+
+@pipeline_app.command("cancel")
+def pipeline_cancel(
+    pipeline_id: str = typer.Argument(..., help="Pipeline run ID"),
+):
+    """Cancel a running pipeline."""
+    def _run():
+        get_client().cancel_pipeline(pipeline_id)
+        print_success(f"Pipeline {pipeline_id} cancelled")
+    _handle(_run)
+
+
+@pipeline_app.command("retry")
+def pipeline_retry(
+    pipeline_id: str = typer.Argument(..., help="Pipeline run ID"),
+):
+    """Retry a failed pipeline."""
+    def _run():
+        result = get_client().retry_pipeline(pipeline_id)
+        print_detail(result, "Pipeline retried")
     _handle(_run)
 
 

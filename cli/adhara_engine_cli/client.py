@@ -1,5 +1,7 @@
 """HTTP client wrapper for the Adhara Engine API."""
 
+import os
+
 import httpx
 
 DEFAULT_BASE_URL = "http://localhost:8000"
@@ -8,9 +10,13 @@ DEFAULT_BASE_URL = "http://localhost:8000"
 class EngineClient:
     """Synchronous HTTP client for the Adhara Engine API."""
 
-    def __init__(self, base_url: str = DEFAULT_BASE_URL):
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, token: str | None = None):
         self.base_url = base_url.rstrip("/")
-        self._client = httpx.Client(base_url=self.base_url, timeout=30.0)
+        self.token = token or os.environ.get("ADHARA_ENGINE_TOKEN", "")
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        self._client = httpx.Client(base_url=self.base_url, timeout=30.0, headers=headers)
 
     def _request(self, method: str, path: str, **kwargs) -> dict | list:
         resp = self._client.request(method, path, **kwargs)
@@ -37,6 +43,9 @@ class EngineClient:
     def get_tenant(self, tenant_id: str) -> dict:
         return self._request("GET", f"/api/v1/tenants/{tenant_id}")
 
+    def update_tenant(self, tenant_id: str, **kwargs) -> dict:
+        return self._request("PATCH", f"/api/v1/tenants/{tenant_id}", json=kwargs)
+
     def delete_tenant(self, tenant_id: str) -> dict:
         return self._request("DELETE", f"/api/v1/tenants/{tenant_id}")
 
@@ -57,6 +66,9 @@ class EngineClient:
 
     def get_workspace(self, workspace_id: str) -> dict:
         return self._request("GET", f"/api/v1/workspaces/{workspace_id}")
+
+    def update_workspace(self, workspace_id: str, **kwargs) -> dict:
+        return self._request("PATCH", f"/api/v1/workspaces/{workspace_id}", json=kwargs)
 
     def delete_workspace(self, workspace_id: str) -> dict:
         return self._request("DELETE", f"/api/v1/workspaces/{workspace_id}")
@@ -83,6 +95,9 @@ class EngineClient:
     def get_site(self, site_id: str) -> dict:
         return self._request("GET", f"/api/v1/sites/{site_id}")
 
+    def update_site(self, site_id: str, **kwargs) -> dict:
+        return self._request("PATCH", f"/api/v1/sites/{site_id}", json=kwargs)
+
     def delete_site(self, site_id: str) -> dict:
         return self._request("DELETE", f"/api/v1/sites/{site_id}")
 
@@ -105,6 +120,20 @@ class EngineClient:
 
     def list_deployments(self, site_id: str) -> list:
         return self._request("GET", f"/api/v1/sites/{site_id}/deployments")
+
+    # ── Pipelines ──────────────────────────────────────────────────────────
+
+    def list_pipelines(self, site_id: str) -> list:
+        return self._request("GET", f"/api/v1/sites/{site_id}/pipelines")
+
+    def get_pipeline(self, pipeline_run_id: str) -> dict:
+        return self._request("GET", f"/api/v1/pipelines/{pipeline_run_id}")
+
+    def cancel_pipeline(self, pipeline_run_id: str) -> dict:
+        return self._request("POST", f"/api/v1/pipelines/{pipeline_run_id}/cancel")
+
+    def retry_pipeline(self, pipeline_run_id: str) -> dict:
+        return self._request("POST", f"/api/v1/pipelines/{pipeline_run_id}/retry")
 
     # ── Env Vars ─────────────────────────────────────────────────────────
 
